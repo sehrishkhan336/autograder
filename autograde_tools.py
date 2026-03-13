@@ -390,7 +390,7 @@ def _generate_comments_html_docx(grade: int, stu_imgs: int, escalation: Optional
         return (
             "<ul>"
             "<li>👍 Strong documentation overall with minor improvements needed.</li>"
-            f"<li>📸 Screenshots found: {stu_imgs}. Recommended: at least 3 covering all major steps.</li>"
+            "<li>📸 Your submission has screenshots, but a few more covering key steps would strengthen it.</li>"
             "<li>💡 Add 1–2 more key screenshots to strengthen your submission.</li>"
             "</ul>"
         )
@@ -399,7 +399,7 @@ def _generate_comments_html_docx(grade: int, stu_imgs: int, escalation: Optional
         return (
             "<ul>"
             "<li>🛠️ Nice effort! Your document includes some screenshots, but a few key steps may be missing.</li>"
-            f"<li>📸 Screenshots found: {stu_imgs}. Recommended: at least 3 that cover all main steps.</li>"
+            "<li>📸 Your submission includes some screenshots, but more are needed to document all major steps.</li>"
             "<li>💡 Try to include a screenshot for each major step in the lab instructions next time.</li>"
             "</ul>"
         )
