@@ -14,12 +14,10 @@ Paragraph-based assignments:
 
 import os
 import re
-import json
 import tempfile
 import zipfile
 import logging
 from typing import Dict, Any, Tuple, List, Optional
-
 import requests
 from dotenv import load_dotenv
 
@@ -88,38 +86,159 @@ def _strip_sql_comments(sql: str) -> str:
     sql = re.sub(r"/\*.*?\*/", "", sql, flags=re.S)
     return sql
 
-def _count_pattern(pattern: str, text: str) -> int:
-    return len(re.findall(pattern, text, flags=re.IGNORECASE))
 
-def _extract_sql_requirements(answer_sql: str) -> Dict[str, int]:
-    """From answer key SQL, determine which SQL operations are required."""
-    clean = _strip_sql_comments(answer_sql.lower())
-    req: Dict[str, int] = {}
-    for op, pattern in SQL_OPS.items():
-        cnt = _count_pattern(pattern, clean)
-        if cnt > 0:
-            req[op] = cnt
-    return req
+def _extract_structural_fingerprint(sql: str) -> Dict[str, bool]:
+    clean = _strip_sql_comments(sql.lower())
 
-def _measure_student_sql_coverage(
-    student_sql: str,
-    requirements: Dict[str, int],
-) -> Tuple[float, Dict[str, float]]:
+    fingerprint = {
+        "has_group_by": bool(re.search(r"\bgroup\s+by\b", clean)),
+        "has_join": bool(re.search(r"\b(join|inner\s+join|left\s+join|right\s+join|full\s+join|cross\s+join)\b", clean)),
+        "has_having": bool(re.search(r"\bhaving\b", clean)),
+        "has_distinct": bool(re.search(r"\bdistinct\b", clean)),
+        "has_cte": bool(re.search(r"\bwith\s+\w+\s+as\s*\(", clean)),
+        "has_subquery": bool(re.search(r"\(\s*select\b", clean)),
+        "has_count": bool(re.search(r"\bcount\s*\(", clean)),
+        "has_sum": bool(re.search(r"\bsum\s*\(", clean)),
+        "has_avg": bool(re.search(r"\bavg\s*\(", clean)),
+        "has_min": bool(re.search(r"\bmin\s*\(", clean)),
+        "has_max": bool(re.search(r"\bmax\s*\(", clean)),
+    }
+
+    return fingerprint
+
+
+def _compare_structure(answer_query: str, student_query: str) -> Tuple[float, List[str]]:
+    if not answer_query or not student_query:
+        return 0.0, ["missing_query"]
+
+    required = _extract_structural_fingerprint(answer_query)
+    student = _extract_structural_fingerprint(student_query)
+
+    # Strict COUNT enforcement
+    if required.get("has_count") and not student.get("has_count"):
+        return 0.0, ["missing_count"]
+
+    missing = []
+    total_required = 0
+    satisfied = 0
+
+    for key, required_present in required.items():
+        if required_present:
+            total_required += 1
+            if student.get(key, False):
+                satisfied += 1
+            else:
+                missing.append(key)
+
+    if total_required == 0:
+        return 1.0, []
+
+    score = satisfied / total_required
+    return round(score, 2), missing
+
+
+def _split_queries(sql: str) -> List[str]:
     """
-    Binary presence logic:
-      coverage[op] = 1.0 if op appears at least once, else 0.0
+    Split SQL into individual queries.
+    Supports ';' and SQL Server 'GO' batch separator.
     """
-    clean = _strip_sql_comments(student_sql.lower())
-    if not requirements:
-        return 0.0, {}
+    if not sql:
+        return []
 
-    coverage: Dict[str, float] = {}
-    for op in requirements.keys():
-        stu_count = _count_pattern(SQL_OPS[op], clean)
-        coverage[op] = 1.0 if stu_count >= 1 else 0.0
+    clean = _strip_sql_comments(sql)
 
-    overall = round(sum(coverage.values()) / len(coverage), 2)
-    return overall, coverage
+    # Normalize GO (case-insensitive) to semicolon
+    clean = re.sub(r'^\s*go\s*$', ';', clean, flags=re.IGNORECASE | re.MULTILINE)
+
+    parts = [q.strip() for q in clean.split(";")]
+    return [q for q in parts if q]
+
+
+def _grade_sql_structural(ans_sql: str, stu_sql: str) -> Dict[str, Any]:
+
+    answer_queries = _split_queries(ans_sql)
+    student_queries = _split_queries(stu_sql)
+
+    if not answer_queries:
+        return {
+            "grade": 1,
+            "structural_valid": False,
+            "escalate": True,
+            "escalation_reason": "Answer key contains no detectable SQL queries.",
+            "score": 0.0,
+            "sql_missing_ops": [],
+            "sql_partial_ops": [],
+        }
+
+    if not student_queries:
+        return {
+            "grade": 1,
+            "structural_valid": False,
+            "escalate": True,
+            "escalation_reason": "Student submission contains no detectable SQL queries.",
+            "score": 0.0,
+            "sql_missing_ops": [],
+            "sql_partial_ops": [],
+        }
+
+    total_required = len(answer_queries)
+    student_count = len(student_queries)
+
+    if student_count < total_required:
+        return {
+            "grade": 2,
+            "structural_valid": True,
+            "escalate": True,
+            "escalation_reason": (
+                f"Only {student_count} of {total_required} required SQL queries were provided."
+            ),
+            "score": 0.0,
+            "sql_missing_ops": [],
+            "sql_partial_ops": [],
+        }
+
+    used_student_indexes = set()
+    question_scores = []
+    all_missing = []
+
+    for ans_q in answer_queries:
+
+        best_score = 0.0
+        best_missing = []
+        best_index = None
+
+        for idx, stu_q in enumerate(student_queries):
+            if idx in used_student_indexes:
+                continue
+
+            score, missing = _compare_structure(ans_q, stu_q)
+
+            if score > best_score:
+                best_score = score
+                best_missing = missing
+                best_index = idx
+
+        if best_index is not None:
+            used_student_indexes.add(best_index)
+
+        question_scores.append(best_score)
+        all_missing.extend(best_missing)
+
+    overall_score = round(sum(question_scores) / len(question_scores), 2)
+    grade = _map_score_to_grade(overall_score)
+
+    return {
+        "grade": grade,
+        "structural_valid": True,
+        "escalate": grade <= 2,
+        "escalation_reason": (
+            "Structural SQL requirements not satisfied." if grade <= 2 else None
+        ),
+        "score": overall_score,
+        "sql_missing_ops": list(set(all_missing)),
+        "sql_partial_ops": [],
+    }
+
 
 def _map_score_to_grade(score: float) -> int:
     """
@@ -262,7 +381,7 @@ def _generate_comments_html_docx(grade: int, stu_imgs: int, escalation: Optional
         return (
             "<ul>"
             "<li>🌟 Great job documenting your work!</li>"
-            f"<li>📸 We found {stu_imgs} screenshots, which meets or exceeds the recommended minimum of 3.</li>"
+            "<li>📸 Your submission includes all the required screenshots to document your work.</li>"
             "<li>✅ Your submission structure looks complete and easy to follow.</li>"
             "</ul>"
         )
@@ -377,6 +496,7 @@ def build_final_comments_and_feedback(
     sql_partial_ops: Optional[List[str]] = None,
     screenshot_count: Optional[int] = None,
     paragraph_count: Optional[int] = None,
+    missing_required_files: Optional[List[str]] = None,
 ) -> Tuple[str, str]:
     """
     Single source of truth: final grade + assignment type + context -> comments + feedback
@@ -386,20 +506,25 @@ def build_final_comments_and_feedback(
     sql_partial_ops = sql_partial_ops or []
     screenshot_count = screenshot_count or 0
     paragraph_count = paragraph_count or 0
+    missing_required_files = missing_required_files or []
 
     if assignment_type == "sql":
         comments_html = _generate_comments_html_sql(final_grade, sql_missing_ops, sql_partial_ops)
         feedback_html = _generate_feedback_html(final_grade, is_sql=True)
-        return comments_html, feedback_html
-
-    if assignment_type == "paragraph":
+    elif assignment_type == "paragraph":
         comments_html = _generate_comments_html_paragraph(final_grade, paragraph_count)
         feedback_html = _generate_feedback_html(final_grade, is_sql=False)
-        return comments_html, feedback_html
+    else:
+        # default: docx screenshots
+        comments_html = _generate_comments_html_docx(final_grade, stu_imgs=screenshot_count)
+        feedback_html = _generate_feedback_html(final_grade, is_sql=False)
 
-    # default: docx screenshots
-    comments_html = _generate_comments_html_docx(final_grade, stu_imgs=screenshot_count)
-    feedback_html = _generate_feedback_html(final_grade, is_sql=False)
+    if final_grade == 1 and missing_required_files:
+        prefix = "<ul>" + "".join(
+            f"<li>❌ Missing required file: {f}</li>" for f in missing_required_files
+        ) + "</ul>"
+        comments_html = prefix + comments_html
+
     return comments_html, feedback_html
 
 # ============================================================
@@ -533,6 +658,7 @@ def _grade_docx_screenshot_structure(stu_zip: str) -> Dict[str, Any]:
         return {
             "grade": 1,
             "assignment_type": "docx",
+            "structural_valid": False,
             "screenshot_count": 0,
             "paragraph_count": 0,
             "escalate": True,
@@ -544,6 +670,7 @@ def _grade_docx_screenshot_structure(stu_zip: str) -> Dict[str, Any]:
         return {
             "grade": 2,
             "assignment_type": "docx",
+            "structural_valid": True,
             "screenshot_count": 0,
             "paragraph_count": para_count,
             "escalate": False,
@@ -561,6 +688,7 @@ def _grade_docx_screenshot_structure(stu_zip: str) -> Dict[str, Any]:
     return {
         "grade": grade,
         "assignment_type": "docx",
+        "structural_valid": True,
         "screenshot_count": img_count,
         "paragraph_count": para_count,
         "escalate": False,
@@ -604,6 +732,7 @@ def _grade_paragraph_presence_structure(stu_zip: str) -> Dict[str, Any]:
     return {
         "grade": grade,
         "assignment_type": "paragraph",
+        "structural_valid": True,
         "screenshot_count": img_count,
         "paragraph_count": para_count,
         "escalate": escalate,
@@ -664,6 +793,7 @@ def autograde_homework(hw: Dict[str, Any]) -> Dict[str, Any]:
         base = {
             "grade": 1,
             "assignment_type": "unknown",
+            "structural_valid": False,
             "escalate": True,
             "escalation_reason": "Missing HomeworkLink URL."
         }
@@ -673,6 +803,7 @@ def autograde_homework(hw: Dict[str, Any]) -> Dict[str, Any]:
         base = {
             "grade": 1,
             "assignment_type": "unknown",
+            "structural_valid": False,
             "escalate": True,
             "escalation_reason": "Submission is not a ZIP file."
         }
@@ -683,6 +814,7 @@ def autograde_homework(hw: Dict[str, Any]) -> Dict[str, Any]:
         base = {
             "grade": 1,
             "assignment_type": "unknown",
+            "structural_valid": False,
             "escalate": True,
             "escalation_reason": "Student ZIP download failed."
         }
@@ -693,6 +825,40 @@ def autograde_homework(hw: Dict[str, Any]) -> Dict[str, Any]:
     ans_exts = inspect_zip_extensions(ans_zip) if ans_zip else []
 
     # --------------------------------------------------------
+    # REQUIRED FILE TYPES GATE (dynamic per answer key)
+    # --------------------------------------------------------
+    if not ans_zip:
+        base = {
+            "grade": 1,
+            "assignment_type": "unknown",
+            "structural_valid": False,
+            "escalate": True,
+            "escalation_reason": "Answer key ZIP download failed or is missing.",
+        }
+        return _apply_performance_escalation(hw, base)
+
+    required_types = {ext for ext in ans_exts if ext in {"sql", "docx"}}
+    missing_required = sorted(required_types - set(stu_exts))
+
+    if missing_required:
+        inferred_type = "sql" if "sql" in required_types else ("docx" if "docx" in required_types else "unknown")
+
+        base = {
+            "grade": 1,
+            "assignment_type": inferred_type,
+            "structural_valid": False,
+            "escalate": True,
+            "escalation_reason": (
+                "Submission format validation failed. "
+                f"Answer key requires: {', '.join(sorted(required_types))}. "
+                f"Student submission missing: {', '.join(missing_required)}."
+            ),
+            "missing_required_files": missing_required,
+            "required_file_types": sorted(required_types),
+        }
+        return _apply_performance_escalation(hw, base)
+
+    # --------------------------------------------------------
     # SQL ASSIGNMENTS (answer key has .sql)
     # --------------------------------------------------------
     if "sql" in ans_exts:
@@ -700,6 +866,7 @@ def autograde_homework(hw: Dict[str, Any]) -> Dict[str, Any]:
             base = {
                 "grade": 1,
                 "assignment_type": "sql",
+                "structural_valid": False,
                 "sql_missing_ops": [],
                 "sql_partial_ops": [],
                 "escalate": True,
@@ -714,6 +881,7 @@ def autograde_homework(hw: Dict[str, Any]) -> Dict[str, Any]:
             base = {
                 "grade": 1,
                 "assignment_type": "sql",
+                "structural_valid": False,
                 "sql_missing_ops": [],
                 "sql_partial_ops": [],
                 "escalate": True,
@@ -725,6 +893,7 @@ def autograde_homework(hw: Dict[str, Any]) -> Dict[str, Any]:
             base = {
                 "grade": 1,
                 "assignment_type": "sql",
+                "structural_valid": False,
                 "sql_missing_ops": [],
                 "sql_partial_ops": [],
                 "escalate": True,
@@ -732,22 +901,19 @@ def autograde_homework(hw: Dict[str, Any]) -> Dict[str, Any]:
             }
             return _apply_performance_escalation(hw, base)
 
-        requirements = _extract_sql_requirements(ans_sql)
-        score, coverage = _measure_student_sql_coverage(stu_sql, requirements)
-        grade = _map_score_to_grade(score)
-
-        missing = [op for op, v in coverage.items() if v == 0.0]
-        partial = [op for op, v in coverage.items() if 0.0 < v < 1.0]
+        struct_result = _grade_sql_structural(ans_sql, stu_sql)
 
         base = {
-            "grade": grade,
+            "grade": struct_result.get("grade", 1),
             "assignment_type": "sql",
-            "score": score,
-            "sql_missing_ops": missing,
-            "sql_partial_ops": partial,
-            "escalate": grade <= 2,
-            "escalation_reason": "Low SQL concept coverage." if grade <= 2 else None,
+            "structural_valid": struct_result.get("structural_valid", True),
+            "score": struct_result.get("score", 0.0),
+            "sql_missing_ops": struct_result.get("sql_missing_ops", []),
+            "sql_partial_ops": struct_result.get("sql_partial_ops", []),
+            "escalate": struct_result.get("escalate", False),
+            "escalation_reason": struct_result.get("escalation_reason"),
         }
+
         logger.info("🧮 Python grading completed (hybrid reconciliation may follow).")
         return _apply_performance_escalation(hw, base)
 
@@ -774,6 +940,7 @@ def autograde_homework(hw: Dict[str, Any]) -> Dict[str, Any]:
     base = {
         "grade": 1,
         "assignment_type": "unknown",
+        "structural_valid": False,
         "escalate": True,
         "escalation_reason": "Unrecognized submission/answer-key format."
     }
@@ -807,7 +974,7 @@ def autograde_homework_hybrid(hw: Dict[str, Any]) -> Dict[str, Any]:
     # 🚨 HARD SAFETY GATE — STRUCTURE ALWAYS WINS
     # ----------------------------------------------------
     if not py_result.get("structural_valid", True):
-        logging.warning(
+        logger.warning(
             f"🚫 Structural failure detected — skipping AI grading for HWID {hw.get('HomeworkID')}"
         )
 
@@ -818,13 +985,12 @@ def autograde_homework_hybrid(hw: Dict[str, Any]) -> Dict[str, Any]:
             sql_partial_ops=py_result.get("sql_partial_ops"),
             screenshot_count=py_result.get("screenshot_count"),
             paragraph_count=py_result.get("paragraph_count"),
+            missing_required_files=py_result.get("missing_required_files"),
         )
 
         return {
             "grade": python_grade,
             "GradingSource": "Python",
-
-
             "comments_html": comments_html,
             "feedback_html": feedback_html,
             "escalate": bool(py_result.get("escalate", False)),
@@ -841,13 +1007,15 @@ def autograde_homework_hybrid(hw: Dict[str, Any]) -> Dict[str, Any]:
     ai_grade = _ai_grade_to_int(ai_result)
 
     # ----------------------------------------------------
-    # 3️⃣ Reconcile final grade
+    # 3️⃣ AI advisory grade computed above (used for logging)
     # ----------------------------------------------------
-    final_grade = python_grade
     log_grade_delta(hw.get("HomeworkID"), ai_grade, python_grade, python_grade)
 
+    # ----------------------------------------------------
+    # 4️⃣ Reconcile final grade (Python is authoritative)
+    # ----------------------------------------------------
+    final_grade = python_grade
 
-      
     # ----------------------------------------------------
     # 5️⃣ Unified comments & feedback (FINAL grade only)
     # ----------------------------------------------------
@@ -858,6 +1026,7 @@ def autograde_homework_hybrid(hw: Dict[str, Any]) -> Dict[str, Any]:
         sql_partial_ops=py_result.get("sql_partial_ops"),
         screenshot_count=py_result.get("screenshot_count"),
         paragraph_count=py_result.get("paragraph_count"),
+        missing_required_files=py_result.get("missing_required_files"),
     )
 
     return {
@@ -871,4 +1040,3 @@ def autograde_homework_hybrid(hw: Dict[str, Any]) -> Dict[str, Any]:
         "ai_grade": ai_grade,
         "assignment_type": assignment_type,
     }
-

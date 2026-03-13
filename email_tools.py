@@ -21,11 +21,6 @@ EMAIL_SENDER = os.getenv("EMAIL_SENDER")     # cai@colaberry.com
 #FORCE_SEND_EMAIL = os.getenv("FORCE_SEND_EMAIL", "no").lower() == "yes"
 EMAIL_DRY_RUN = os.getenv("EMAIL_DRY_RUN", "no").lower() == "yes"
 
-# BCC list: comma-separated emails
-bcc_list = []
-raw_bcc = os.getenv("BCC_EMAILS")
-if raw_bcc:
-    bcc_list = [b.strip() for b in raw_bcc.split(",") if b.strip()]
 
 # Instructor escalation email from .env
 ESCALATION_EMAIL = os.getenv("ESCALATION_EMAIL")   # ali@colaberry.com
@@ -58,7 +53,7 @@ def build_student_html(hw, grade, comments_html, feedback_html):
     <p><b>Feedback:</b></p>
     {feedback_html}
 
-    <p><b>Homework Link:</b> <a href="{link}">{link}</a></p>
+    {f'<p><b>Homework Link:</b> <a href="{link}">{link}</a></p>' if int(grade) != 5 else ''}
 
     <p>
         <b>Course:</b> {course}<br>
@@ -115,9 +110,6 @@ def send_feedback_email(hw, grade, comments_html, feedback_html):
         }
     }
 
-    # Add BCC
-    for b in bcc_list:
-        payload["message"]["to"].append({"email": b, "type": "bcc"})
 
     # Send via Mandrill
     try:
@@ -206,9 +198,6 @@ def send_escalation_email(hw, result):
         }
     }
 
-    # Add BCC recipients
-    for b in bcc_list:
-        payload["message"]["to"].append({"email": b, "type": "bcc"})
 
     # Send via Mandrill
     try:
