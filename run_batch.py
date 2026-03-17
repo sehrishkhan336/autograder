@@ -77,7 +77,7 @@ def main():
                 f"⚠️ HWID {hwid} missing AnswerKey — routed for manual review"
             )
 
-            insert_rejected_homework(
+            inserted = insert_rejected_homework(
                 homework_id=hwid,
                 grade=grade,
                 comments=clean_comments,
@@ -88,11 +88,12 @@ def main():
                 hw=hw
             )
 
-            send_escalation_email(hw, {
-                **result,
-                "escalate": True,
-                "escalation_reason": "Answer key missing; manual review required"
-            })
+            if inserted:
+                send_escalation_email(hw, {
+                    **result,
+                    "escalate": True,
+                    "escalation_reason": "Answer key missing; manual review required"
+                })
 
             logging.info(
                 f"🚨 HWID {hwid} | Missing AnswerKey → AUTOGRADER_REJECTS | Student email BLOCKED"
@@ -100,7 +101,7 @@ def main():
 
         # 🚫 Low grades → reject table
         elif grade <= 2:
-            insert_rejected_homework(
+            inserted = insert_rejected_homework(
                 homework_id=hwid,
                 grade=grade,
                 comments=clean_comments,
@@ -111,7 +112,8 @@ def main():
                 hw=hw
             )
 
-            send_escalation_email(hw, result)
+            if inserted:
+                send_escalation_email(hw, result)
 
             logging.info(
                 f"🚨 HWID {hwid} | Grade {grade} routed to AUTOGRADER_REJECTS "

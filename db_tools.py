@@ -220,7 +220,7 @@ def insert_rejected_homework(
             )
             cursor.close()
             conn.close()
-            return
+            return False
 
         # -------------------------------------------------
         # Insert reject record
@@ -274,9 +274,11 @@ def insert_rejected_homework(
             f"🚫 HWID {homework_id} inserted into {REJECT_TABLE} "
             f"(grade={grade}, escalated)"
         )
+        return True
 
     except Exception as e:
         logging.error(
             f"❌ Reject insert failed for HWID {homework_id}: {e}"
         )
+        return False
 # ----------------------------------------------------------------------
