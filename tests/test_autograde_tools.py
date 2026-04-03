@@ -425,3 +425,109 @@ class TestBuildFinalCommentsAndFeedback:
                     final_grade=grade, assignment_type=atype
                 )
                 assert f, f"Empty feedback for grade={grade} type={atype}"
+
+
+# ============================================================
+# SQL pattern coverage — fingerprint-tracked and untracked ops
+# ============================================================
+
+# Fixture design notes:
+#   "match" tests: student SQL == answer SQL → score 1.0 → grade 5
+#   "missing" tests: answer has (feature + GROUP BY); student has GROUP BY only
+#     → score 0.5 → grade 4 (except CTE which also triggers has_subquery → score 0.33 → grade 3)
+#     This ensures score > 0.0 so the missing key is actually recorded in sql_missing_ops.
+#     (When score == 0.0, _grade_sql_structural leaves sql_missing_ops empty by design.)
+
+_FINGERPRINT_FIXTURES = [
+    # (answer_sql, student_sql_for_missing_case, feature_key, expected_grade_when_missing)
+    (
+        "SELECT AVG(col) FROM t GROUP BY x",
+        "SELECT col FROM t GROUP BY x",
+        "has_avg", 4,
+    ),
+    (
+        "SELECT MIN(col) FROM t GROUP BY x",
+        "SELECT col FROM t GROUP BY x",
+        "has_min", 4,
+    ),
+    (
+        "SELECT MAX(col) FROM t GROUP BY x",
+        "SELECT col FROM t GROUP BY x",
+        "has_max", 4,
+    ),
+    (
+        "SELECT DISTINCT col FROM t GROUP BY x",
+        "SELECT col FROM t GROUP BY x",
+        "has_distinct", 4,
+    ),
+    # CTE answer also triggers has_subquery (the `(SELECT …)` inside WITH),
+    # so total_required=3, student satisfies 1 (GROUP BY) → grade 3.
+    (
+        "WITH cte AS (SELECT 1) SELECT * FROM cte GROUP BY 1",
+        "SELECT 1 GROUP BY 1",
+        "has_cte", 3,
+    ),
+    (
+        "SELECT * FROM (SELECT id FROM t) sub GROUP BY sub.id",
+        "SELECT id FROM t GROUP BY id",
+        "has_subquery", 4,
+    ),
+]
+
+
+class TestSqlPatternCoverage:
+    """
+    Explicit coverage for every fingerprint-tracked SQL pattern not already
+    covered in TestGradeSqlStructural, plus a confirmation that SQL_OPS-only
+    patterns (ORDER BY, CASE, DML, DDL, implicit join) have no scoring effect
+    because _extract_structural_fingerprint does not track them.
+    """
+
+    @pytest.mark.parametrize(
+        "ans_sql, _student, feature_key, _expected_grade",
+        _FINGERPRINT_FIXTURES,
+        ids=[f[2] for f in _FINGERPRINT_FIXTURES],
+    )
+    def test_pattern_present_in_student_gives_grade_5(
+        self, ans_sql, _student, feature_key, _expected_grade
+    ):
+        # Student == answer → perfect structural match → grade 5, nothing missing.
+        result = _grade_sql_structural(ans_sql, ans_sql)
+        assert result["grade"] == 5
+        assert feature_key not in result["sql_missing_ops"]
+        assert result["escalate"] is False
+
+    @pytest.mark.parametrize(
+        "ans_sql, student_sql, feature_key, expected_grade",
+        _FINGERPRINT_FIXTURES,
+        ids=[f[2] for f in _FINGERPRINT_FIXTURES],
+    )
+    def test_pattern_missing_in_student_listed_in_missing_ops(
+        self, ans_sql, student_sql, feature_key, expected_grade
+    ):
+        # Student satisfies the non-feature op (GROUP BY) but not the feature itself,
+        # so score > 0.0 and the feature key is recorded in sql_missing_ops.
+        result = _grade_sql_structural(ans_sql, student_sql)
+        assert result["grade"] == expected_grade
+        assert feature_key in result["sql_missing_ops"]
+
+    @pytest.mark.parametrize("untracked_sql", [
+        "ORDER BY name",
+        "CASE WHEN x > 1 THEN 'y' ELSE 'n' END",
+        "CREATE TABLE t (id INT)",
+        "INSERT INTO t VALUES (1)",
+        "UPDATE t SET x = 1",
+        "DELETE FROM t WHERE id = 1",
+        "ALTER TABLE t ADD col INT",
+        "SELECT * FROM t1, t2 WHERE t1.id = t2.id",  # implicit join
+    ])
+    def test_sql_ops_only_patterns_have_no_structural_scoring_effect(
+        self, untracked_sql
+    ):
+        # These patterns live in SQL_OPS but are absent from _extract_structural_fingerprint.
+        # total_required == 0 for any answer key that uses only these patterns,
+        # so _compare_structure returns score 1.0 regardless of the student query.
+        result = _grade_sql_structural(untracked_sql, "SELECT 1")
+        assert result["grade"] == 5
+        assert result["escalate"] is False
+        assert result["sql_missing_ops"] == []
