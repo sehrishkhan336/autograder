@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 REJECT_TABLE = "ADF_Homework_Autograder_Rejects"
+REJECT_TEST_TABLE = "ADF_Homework_Autograder_Rejects_test"
 
 # ---------------------------------------------------------------------
 # Load DB credentials
@@ -129,7 +130,6 @@ def update_database_grade(
 
         sql = """
             INSERT INTO dbo.ADF_Homework_test (
-                 HomeworkID,
                 ClassSignupsID,
                 SectionID,
                 StudentUserID,
@@ -146,11 +146,10 @@ def update_database_grade(
                 EscalateFlag,
                 DateProcessed
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE());
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE());
         """
 
         params = (
-            homework_id,
             hw.get("ClassSignupsID"),
             hw.get("SectionID"),
             hw.get("StudentUserID"),
@@ -203,7 +202,7 @@ def insert_rejected_homework(
         # -------------------------------------------------
         check_sql = f"""
             SELECT 1
-            FROM dbo.{REJECT_TABLE}
+            FROM dbo.{REJECT_TEST_TABLE}
             WHERE HomeworkID = ?
               AND StudentUserID = ?
         """
@@ -226,7 +225,7 @@ def insert_rejected_homework(
         # Insert reject record
         # -------------------------------------------------
         sql = f"""
-            INSERT INTO dbo.{REJECT_TABLE} (
+            INSERT INTO dbo.{REJECT_TEST_TABLE} (
                 HomeworkID,
                 ClassSignupsID,
                 SectionID,
@@ -271,7 +270,7 @@ def insert_rejected_homework(
         conn.close()
 
         logging.info(
-            f"🚫 HWID {homework_id} inserted into {REJECT_TABLE} "
+            f"🚫 HWID {homework_id} inserted into {REJECT_TEST_TABLE} "
             f"(grade={grade}, escalated)"
         )
         return True

@@ -14,20 +14,19 @@ Paragraph-based assignments:
 
 import os
 import re
-import tempfile
-import zipfile
 import logging
 from typing import Dict, Any, Tuple, List, Optional
 import requests
 from dotenv import load_dotenv
+from file_tools import (
+    download_file,
+    inspect_zip_extensions,
+    extract_sql_from_zip,
+    _extract_docx_from_zip,
+    _count_nonempty_paragraphs,
+)
 
 load_dotenv()
-
-try:
-    import docx  # python-docx
-except ImportError:
-    docx = None
-    logging.warning("python-docx is not installed; DOCX grading will be limited.")
 
 logger = logging.getLogger(__name__)
 
@@ -260,82 +259,6 @@ def _map_score_to_grade(score: float) -> int:
     return 1
 
 # ============================================================
-# ZIP / DOWNLOAD HELPERS
-# ============================================================
-
-def download_file(url: str) -> Optional[str]:
-    if not url:
-        return None
-    local = tempfile.mktemp()
-    try:
-        r = requests.get(url, timeout=30)
-        r.raise_for_status()
-        with open(local, "wb") as f:
-            f.write(r.content)
-        return local
-    except Exception as e:
-        logger.warning(f"Download failed: {e}")
-        return None
-
-def inspect_zip_extensions(zip_path: Optional[str]) -> List[str]:
-    if not zip_path:
-        return []
-    try:
-        with zipfile.ZipFile(zip_path, "r") as z:
-            exts = []
-            for name in z.namelist():
-                if "." in name:
-                    exts.append(name.split(".")[-1].lower())
-            return exts
-    except Exception:
-        return []
-
-def extract_sql_from_zip(zip_path: Optional[str]) -> str:
-    if not zip_path:
-        return ""
-    try:
-        with zipfile.ZipFile(zip_path, "r") as z:
-            for name in z.namelist():
-                if name.lower().endswith(".sql"):
-                    return z.open(name).read().decode(errors="ignore")
-    except Exception:
-        pass
-    return ""
-
-# ============================================================
-# DOCX HELPERS
-# ============================================================
-
-def _extract_docx_from_zip(zip_path: str) -> Tuple[str, int]:
-    """
-    Return (text, image_count) from the FIRST .docx in the ZIP.
-    If python-docx not available or parsing fails, returns ("", 0).
-    """
-    if not docx:
-        return "", 0
-
-    try:
-        with zipfile.ZipFile(zip_path, "r") as z:
-            for name in z.namelist():
-                if name.lower().endswith(".docx"):
-                    tmp_path = tempfile.mktemp(suffix=".docx")
-                    with z.open(name) as src, open(tmp_path, "wb") as dst:
-                        dst.write(src.read())
-                    d = docx.Document(tmp_path)
-                    text = "\n".join(p.text for p in d.paragraphs)
-                    image_count = len(d.inline_shapes)
-                    return text, image_count
-    except Exception as e:
-        logger.warning(f"Error extracting DOCX from ZIP: {e}")
-
-    return "", 0
-
-def _count_nonempty_paragraphs(doc_text: str) -> int:
-    lines = [ln.strip() for ln in (doc_text or "").split("\n")]
-    nonempty = [ln for ln in lines if ln]
-    return len(nonempty)
-
-# ============================================================
 # COMMENTS & FEEDBACK TEMPLATES (GRADE-BASED)
 # ============================================================
 
@@ -352,7 +275,7 @@ def _generate_comments_html_sql(grade: int, missing_ops: List[str], partial_ops:
             bullets.append(f"⚠️ Minor missing SQL elements: {', '.join(missing_ops)}")
         if partial_ops:
             bullets.append(f"🛠️ Partially implemented: {', '.join(partial_ops)}")
-        bullets.append("💡 Review these parts in the answer key to reach a perfect score next time.")
+        bullets.append("💡 Review these parts in the lab instructions to reach a perfect score next time.")
         return "<ul>" + "".join(f"<li>{b}</li>" for b in bullets) + "</ul>"
 
     if grade == 3:
@@ -365,7 +288,7 @@ def _generate_comments_html_sql(grade: int, missing_ops: List[str], partial_ops:
     if partial_ops:
         bullets.append(f"⚠️ Partially implemented SQL operations: {', '.join(partial_ops)}")
 
-    bullets.append("💡 Revisit the lab video and answer key, and make sure each required step is present in your SQL.")
+    bullets.append("💡 Revisit the lab video and lab instructions, and make sure each required step is present in your SQL.")
     return "<ul>" + "".join(f"<li>{b}</li>" for b in bullets) + "</ul>"
 
 def _generate_comments_html_docx(grade: int, stu_imgs: int, escalation: Optional[str] = None) -> str:
@@ -478,7 +401,7 @@ def _generate_feedback_html(grade: int, is_sql: bool) -> str:
         main = (
             "<ul>"
             "<li>🌱 This is a starting point — don't be discouraged.</li>"
-            "<li>🔍 Re-watch the lab video and compare your work to the answer key step by step.</li>"
+            "<li>🔍 Re-watch the lab video and review the lab steps carefully.</li>"
             "</ul>"
         )
 
@@ -1009,12 +932,35 @@ def autograde_homework_hybrid(hw: Dict[str, Any]) -> Dict[str, Any]:
     # ----------------------------------------------------
     # 3️⃣ AI advisory grade computed above (used for logging)
     # ----------------------------------------------------
-    log_grade_delta(hw.get("HomeworkID"), ai_grade, python_grade, python_grade)
 
     # ----------------------------------------------------
-    # 4️⃣ Reconcile final grade (Python is authoritative)
+    # 4️⃣ Reconcile final grade
     # ----------------------------------------------------
-    final_grade = python_grade
+    if ai_grade is None:
+        # No AI result — Python grade stands
+        final_grade = python_grade
+        grading_source = "Python"
+    else:
+        delta = ai_grade - python_grade   # positive = AI higher, negative = Python higher
+
+        if abs(delta) <= 1:
+            # Grades agree within 1 — take the higher of the two
+            final_grade = max(ai_grade, python_grade)
+            grading_source = "Reconciled"
+        elif ai_grade > python_grade:
+            # AI is higher by 2 or more — AI grade is used
+            final_grade = ai_grade
+            grading_source = "AI-primary"
+        else:
+            # Python > AI — AI is more conservative, defer to AI
+            final_grade = ai_grade
+            grading_source = "AI-primary"
+
+    escalate = final_grade <= 2
+    if not escalate:
+        escalation_reason = None
+
+    log_grade_delta(hw.get("HomeworkID"), ai_grade, python_grade, final_grade)
 
     # ----------------------------------------------------
     # 5️⃣ Unified comments & feedback (FINAL grade only)
@@ -1031,7 +977,7 @@ def autograde_homework_hybrid(hw: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "grade": final_grade,
-        "GradingSource": "Python (AI-reviewed)",
+        "GradingSource": grading_source,
         "comments_html": comments_html,
         "feedback_html": feedback_html,
         "escalate": escalate,

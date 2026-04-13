@@ -47,10 +47,10 @@ def build_student_html(hw, grade, comments_html, feedback_html):
     <p>Your submission for <b>{assignment}</b> has been graded.</p>
     <p><b>Grade:</b> {grade}/5</p>
 
-    <p><b>Comments:</b></p>
+    <b>Comments:</b>
     {comments_html}
 
-    <p><b>Feedback:</b></p>
+    <b>Feedback:</b>
     {feedback_html}
 
     {f'<p><b>Homework Link:</b> <a href="{link}">{link}</a></p>' if int(grade) != 5 else ''}

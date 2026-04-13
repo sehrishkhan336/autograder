@@ -1,16 +1,15 @@
 import logging
 from bs4 import BeautifulSoup
 from autograde_tools import autograde_homework_hybrid
-from db_tools import (get_ungraded_homeworks,update_database_grade,insert_rejected_homework)
+from autograde_agent import autograde_homework_agent
+from db_tools import (get_ungraded_homeworks, update_database_grade, insert_rejected_homework)
 from email_tools import send_feedback_email, send_escalation_email
 
 # ------------------------------------------------------------
-# Logging
+# Logging — suppress INFO from all modules; silence httpx
 # ------------------------------------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(levelname)s | %(message)s"
-)
+logging.basicConfig(level=logging.WARNING, format="%(levelname)s | %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # ------------------------------------------------------------
 # Helpers
@@ -27,38 +26,41 @@ def strip_html(html_text: str) -> str:
 # Main Runner
 # ------------------------------------------------------------
 def main():
-    logging.info("📌 Fetching ungraded items from vw_Homework (via db_tools)…")
-
     homeworks = get_ungraded_homeworks()
-    logging.info(f"📌 Found {len(homeworks)} ungraded entries.\n")
+    total    = len(homeworks)
+    passed   = 0
+    rejected = 0
 
     for hw in homeworks:
-        hwid = hw.get("HomeworkID")
-        logging.info(f"➡️ Grading HWID {hwid}")
+        hwid          = hw.get("HomeworkID")
+        student_name  = hw.get("StudentName", "Unknown")
+        section_name  = hw.get("SectionName", "Unknown")
+        student_email = hw.get("StudentEmail", "")
+
+        print(f"➡️  HWID {hwid} | {student_name} | {section_name}")
 
         # ----------------------------------------------------
-        # 1️⃣ Run Hybrid Autograder (v8)
+        # 1️⃣ Run Agent Autograder (primary)
         # ----------------------------------------------------
-        result = autograde_homework_hybrid(hw)
+        result = autograde_homework_agent(hw)
 
-        grade = int(result.get("grade", 1))
-        comments_html = result.get("comments_html", "")
-        feedback_html = result.get("feedback_html", "")
-        escalate = result.get("escalate", False)
+        grade             = int(result.get("grade", 1))
+        comments_html     = result.get("comments_html", "")
+        feedback_html     = result.get("feedback_html", "")
+        escalate          = result.get("escalate", False)
         escalation_reason = result.get("escalation_reason")
-        grading_source = result.get("GradingSource", "Python")
+        grading_source    = result.get("GradingSource", "Python")
 
         # ----------------------------------------------------
-        # 2️⃣ Diagnostic logging
+        # 2️⃣ Hybrid grader (shadow run — comparison only)
         # ----------------------------------------------------
-        if result.get("ai_grade") is not None:
-            logging.info(
-                f"🤖 AI Grade: {result.get('ai_grade')} | "
-                f"🧮 Python Grade: {result.get('python_grade')} | "
-                f"🎯 Final Grade: {grade}"
-            )
-        else:
-            logging.info("🧮 Python Grade only (no AI grade).")
+        try:
+            hybrid_result = autograde_homework_hybrid(hw)
+            hybrid_grade  = int(hybrid_result.get("grade", 1))
+            delta         = hybrid_grade - grade
+            print(f"🔬  Shadow: Agent={grade} | Hybrid={hybrid_grade} | Delta={delta:+d}")
+        except Exception:
+            pass
 
         # ----------------------------------------------------
         # 3️⃣ Clean HTML for DB storage
@@ -73,9 +75,8 @@ def main():
 
         # 🚨 Guardrail: Missing AnswerKey → force manual review
         if not answer_key or str(answer_key).strip() == "":
-            logging.warning(
-                f"⚠️ HWID {hwid} missing AnswerKey — routed for manual review"
-            )
+            reason = "Answer key missing; manual review required"
+            print(f"🚨  HWID {hwid} | Grade {grade} | REJECTED | {reason}")
 
             inserted = insert_rejected_homework(
                 homework_id=hwid,
@@ -83,7 +84,7 @@ def main():
                 comments=clean_comments,
                 feedback=clean_feedback,
                 escalate=True,
-                escalation_reason="Answer key missing; manual review required",
+                escalation_reason=reason,
                 grading_source=grading_source,
                 hw=hw
             )
@@ -92,15 +93,16 @@ def main():
                 send_escalation_email(hw, {
                     **result,
                     "escalate": True,
-                    "escalation_reason": "Answer key missing; manual review required"
+                    "escalation_reason": reason
                 })
+                print(f"📧  Escalation email sent to instructor")
 
-            logging.info(
-                f"🚨 HWID {hwid} | Missing AnswerKey → AUTOGRADER_REJECTS | Student email BLOCKED"
-            )
+            rejected += 1
 
         # 🚫 Low grades → reject table
         elif grade <= 2:
+            print(f"🚨  HWID {hwid} | Grade {grade} | REJECTED | {escalation_reason}")
+
             inserted = insert_rejected_homework(
                 homework_id=hwid,
                 grade=grade,
@@ -114,14 +116,14 @@ def main():
 
             if inserted:
                 send_escalation_email(hw, result)
+                print(f"📧  Escalation email sent to instructor")
 
-            logging.info(
-                f"🚨 HWID {hwid} | Grade {grade} routed to AUTOGRADER_REJECTS "
-                f"| Student email BLOCKED"
-            )
+            rejected += 1
 
         # ✅ Normal grades → main table
         else:
+            print(f"✅  HWID {hwid} | Grade {grade} | Source: {grading_source}")
+
             update_database_grade(
                 homework_id=hwid,
                 grade=grade,
@@ -135,13 +137,19 @@ def main():
 
             if escalate:
                 send_escalation_email(hw, result)
+                print(f"📧  Escalation email sent to instructor")
 
             send_feedback_email(hw, grade, comments_html, feedback_html)
+            print(f"📧  Student email sent to {student_email}")
 
-            logging.info(
-                f"✅ HWID {hwid} | Grade {grade} updated in MAIN TABLE "
-                f"| Student email SENT"
-            )
+            passed += 1
+
+    print()
+    print("════════════════════════════════")
+    print(f"Batch complete | Total: {total} | Passed: {passed} | Rejected: {rejected}")
+    print("════════════════════════════════")
+
+
 # ------------------------------------------------------------
 # Entry Point
 # ------------------------------------------------------------
