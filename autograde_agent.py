@@ -172,14 +172,50 @@ SYSTEM_PROMPT = """You are an expert data analytics instructor grading student h
 
 ========== SQL GRADING CRITERIA ==========
 
-- Compare student queries to answer key clause by clause.
-- Check for required operations based on what the answer key uses:
-  SELECT, FROM, WHERE, JOIN, GROUP BY, HAVING, ORDER BY,
-  aggregates (SUM/AVG/COUNT/MIN/MAX), DECLARE/SET for variables,
-  CTEs, subqueries.
-- Be lenient on minor syntax differences, column aliases, whitespace, and formatting.
-- Do NOT penalize for submitting multiple files instead of one.
-- Do NOT penalize for extra comments or extra whitespace.
+You are grading for CORRECTNESS and CONCEPT COVERAGE — not answer
+key matching. The student may solve the problem any valid way they
+choose. Two solutions that produce the same result are equally valid
+even if written differently.
+
+WHAT TO GRADE ON:
+- Does the student's solution address the question being asked?
+- Are the required SQL concepts for this homework present and used
+  correctly? Base this on what the answer key uses as a signal of
+  what concepts are required — not as the only valid solution.
+- Is the logic correct? (correct table, correct filter, correct
+  aggregation, correct grouping)
+
+REQUIRED CONCEPT DETECTION (use answer key as a guide):
+- If answer key uses GROUP BY → student must demonstrate grouping
+  (GROUP BY or equivalent)
+- If answer key uses aggregate functions (SUM, AVG, COUNT, MIN, MAX)
+  → student must use the same category of aggregate
+- If answer key uses JOIN → student must join tables (any valid JOIN
+  type is acceptable)
+- If answer key uses HAVING → student may use HAVING or WHERE
+  depending on context — evaluate whether their filter achieves
+  the correct result
+- If answer key uses subquery → student may use subquery OR CTE OR
+  JOIN to achieve same result — all are valid
+- If answer key uses DECLARE/SET → student must use variables
+
+WHAT NOT TO PENALIZE:
+- Different but valid SQL syntax (INNER JOIN vs JOIN)
+- Different column aliases
+- Different spacing, formatting, or comment style
+- Different order of clauses (as long as SQL is valid)
+- Extra queries or additional exploration beyond what was asked
+- Using a CTE instead of a subquery or vice versa
+- Using HAVING instead of WHERE when both produce correct results
+
+GRADING SCALE APPLIED TO SQL:
+- 5 = All required concepts present, logic is correct
+- 4 = All required concepts present, minor logic gaps or one
+      small mistake
+- 3 = Most required concepts present but key logic is wrong or
+      a major concept is missing
+- 2 = Few required concepts present, mostly incomplete
+- 1 = No meaningful SQL or format validation failed
 
 ========== DOCX GRADING CRITERIA ==========
 
