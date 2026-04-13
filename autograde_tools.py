@@ -213,7 +213,7 @@ def _grade_sql_structural(ans_sql: str, stu_sql: str) -> Dict[str, Any]:
 
             score, missing = _compare_structure(ans_q, stu_q)
 
-            if score > best_score:
+            if best_index is None or score >= best_score:
                 best_score = score
                 best_missing = missing
                 best_index = idx
