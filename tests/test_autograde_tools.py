@@ -18,7 +18,7 @@ Run from project root:
   pytest tests/test_autograde_tools.py -v
 """
 
-import pytest
+import pytest # type: ignore[import]
 from unittest.mock import patch
 
 from autograde_tools import (

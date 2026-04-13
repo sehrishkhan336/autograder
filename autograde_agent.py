@@ -413,7 +413,7 @@ def autograde_homework_agent(hw: Dict[str, Any]) -> Dict[str, Any]:
         "then call finalize_grade."
     )
 
-    openai_messages = [
+    openai_messages = [  # type: ignore[var-annotated]
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_message},
     ]
@@ -424,8 +424,8 @@ def autograde_homework_agent(hw: Dict[str, Any]) -> Dict[str, Any]:
         try:
             response = client.chat.completions.create(
                 model=OPENAI_MODEL,
-                messages=openai_messages,
-                tools=openai_tools,
+                messages=openai_messages,  # type: ignore[arg-type]
+                tools=openai_tools,  # type: ignore[arg-type]
                 tool_choice="auto",
             )
         except Exception as e:
@@ -448,8 +448,8 @@ def autograde_homework_agent(hw: Dict[str, Any]) -> Dict[str, Any]:
                     "id": tc.id,
                     "type": "function",
                     "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments,
+                        "name": tc.function.name,  # type: ignore[union-attr]
+                        "arguments": tc.function.arguments,  # type: ignore[union-attr]
                     },
                 }
                 for tc in assistant_message.tool_calls
@@ -468,8 +468,8 @@ def autograde_homework_agent(hw: Dict[str, Any]) -> Dict[str, Any]:
         # Execute every tool call in this turn; append each result individually
         finalized = False
         for tc in (assistant_message.tool_calls or []):
-            tool_name = tc.function.name
-            tool_input = json.loads(tc.function.arguments)
+            tool_name = tc.function.name  # type: ignore[union-attr]
+            tool_input = json.loads(tc.function.arguments)  # type: ignore[union-attr]
 
             logger.info(f"🔧 Tool: {tool_name} | input={json.dumps(tool_input)[:300]}")
             tool_output = execute_tool(tool_name, tool_input)
