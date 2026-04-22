@@ -95,7 +95,9 @@ TOOLS = [
             "fetching both ZIPs, validating format, and completing a semantic comparison "
             "of the student's submission against the answer key. "
             "comments_html and feedback_html must be personalized HTML that references "
-            "the student's specific work — not generic placeholders."
+            "the student's specific work — not generic placeholders. "
+            "Set confidence to 0.9+ when certain, 0.7–0.8 when mostly sure, "
+            "0.5 or below when uncertain (ambiguous submission or borderline grade)."
         ),
         "input_schema": {
             "type": "object",
@@ -129,9 +131,30 @@ TOOLS = [
                         "Brief reason for manual review. Required when escalate is true, "
                         "otherwise omit or pass null."
                     )
+                },
+                "confidence": {
+                    "type": "number",
+                    "description": (
+                        "Grading confidence from 0.0 to 1.0. "
+                        "Return 0.9+ when certain, 0.7–0.8 when mostly sure, "
+                        "0.5 or below when uncertain."
+                    )
                 }
             },
-            "required": ["grade", "comments_html", "feedback_html", "escalate"]
+            "required": ["grade", "comments_html", "feedback_html", "escalate", "confidence"]
+        }
+    },
+    {
+        "name": "validate_with_python",
+        "description": (
+            "Run the Python structural grader as a second opinion. Use this when your "
+            "confidence is 0.7 or below, or when you want to sanity-check a borderline "
+            "grade before finalizing."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": []
         }
     }
 ]
@@ -237,6 +260,28 @@ GRADING SCALE APPLIED TO SQL:
   using references to the lab instructions and lab steps.
 - Always use a friendly, encouraging tone.
 - Always use HTML tags (<ul>, <li>, <p>) in comments_html and feedback_html.
+
+========== CONFIDENCE SCORING ==========
+
+Set confidence based on how clearly the submission maps to a grade:
+- 0.9–1.0: Clear pass or clear fail — submission is unambiguous (e.g. all concepts
+  present and correct, or empty/wrong-format file).
+- 0.7–0.8: Mostly sure but minor ambiguity (e.g. one required concept is unclear
+  or a query is partially correct).
+- 0.5–0.6: Borderline grade; submission could reasonably be one grade higher or lower
+  (e.g. incomplete but shows real effort, or logic is close but not quite right).
+- 0.0–0.4: Very uncertain — submission is highly ambiguous, uses an unusual approach
+  that is hard to evaluate, or content is too sparse to judge fairly.
+
+========== PYTHON VALIDATION ==========
+
+When your confidence is below 0.7, you MUST call validate_with_python before finalize_grade.
+- validate_with_python runs deterministic structural checks: SQL pattern matching,
+  required file presence, screenshot count, and paragraph count.
+- Its grade is advisory only — you make the final grading decision based on your
+  full semantic evaluation of the submission.
+- If the Python grade differs from your intended grade by 2 or more, briefly note
+  why in escalation_reason so an instructor can review if needed.
 """
 
 # ============================================================
@@ -321,15 +366,35 @@ def _make_executor(hw: Dict[str, Any]) -> Tuple[Callable, Callable]:
             # Enforce escalation for very low grades
             if grade <= 2:
                 escalate = True
+            raw_confidence = tool_input.get("confidence", 0.5)
+            confidence = max(0.0, min(1.0, float(raw_confidence)))
             state["final_result"] = {
                 "grade": grade,
                 "comments_html": tool_input.get("comments_html", ""),
                 "feedback_html": tool_input.get("feedback_html", ""),
                 "escalate": escalate,
                 "escalation_reason": tool_input.get("escalation_reason") or None,
+                "confidence": confidence,
                 "GradingSource": "OpenAI-agent",
             }
             return json.dumps({"status": "grade recorded", "grade": grade})
+
+        # ── validate_with_python ────────────────────────────────────────
+        if tool_name == "validate_with_python":
+            from autograde_tools import autograde_homework  # lazy import — avoids circular risk
+            try:
+                py_result = autograde_homework(hw)
+                return json.dumps({
+                    "python_grade":     py_result.get("grade"),
+                    "assignment_type":  py_result.get("assignment_type"),
+                    "structural_valid": py_result.get("structural_valid"),
+                    "escalate":         py_result.get("escalate"),
+                    "escalation_reason": py_result.get("escalation_reason"),
+                    "sql_missing_ops":  py_result.get("sql_missing_ops", []),
+                    "score":            py_result.get("score"),
+                })
+            except Exception as e:
+                return json.dumps({"error": f"Python grader failed: {e}"})
 
         return json.dumps({"error": f"Unknown tool: {tool_name}"})
 
