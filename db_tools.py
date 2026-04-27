@@ -17,6 +17,7 @@ DB_DATABASE = os.getenv("DB_DATABASE")
 DB_USERNAME = os.getenv("DB_USERNAME")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_TRUSTED = os.getenv("DB_TRUSTED", "no").lower() == "yes"
+USE_TEST_SOURCE = os.getenv("USE_TEST_SOURCE", "no").lower() == "yes"
 
 SOURCE_VIEW = "vw_Homework"        # read-only view
 TEST_TABLE = "ADF_Homework_test"   # write-only table
@@ -59,30 +60,49 @@ def get_connection():
 # 1️⃣ Fetch Ungraded Homeworks (MINIMAL fields only)
 # ---------------------------------------------------------------------
 def get_ungraded_homeworks(limit=50):
-    """Returns rows from vw_Homework with only fields needed by autograder."""
+    """Returns rows for autograder. Source switches on USE_TEST_SOURCE env flag."""
 
     conn = get_connection()
     if not conn:
         return []
 
     try:
-        sql = f"""
-            SELECT TOP ({limit})
-                HomeworkID,
-                HomeworkLink,
-                AnswerKey,
-                SectionID,
-                StudentEmail,
-                StudentUserID,   -- from view
-                StudentName,
-                SectionName,
-                ClassSignupsID
-            FROM {SOURCE_VIEW}
-            WHERE DateGraded IS NULL
-              AND DateEntered IS NOT NULL
-              AND StudentName IS NOT NULL
-            ORDER BY DateEntered;
-        """
+        if USE_TEST_SOURCE:
+            sql = f"""
+                SELECT TOP ({limit})
+                    HomeworkID,
+                    HomeworkLink,
+                    AnswerKey,
+                    SectionID,
+                    StudentEmail,
+                    StudentUserID,
+                    StudentName,
+                    SectionName,
+                    ClassSignupsID,
+                    EscalationReason
+                FROM dbo.ADF_Homework_test
+                WHERE Instr_Rating IS NULL
+                  AND EscalationReason LIKE 'OriginalHWID=%%'
+                ORDER BY DateProcessed DESC
+            """
+        else:
+            sql = f"""
+                SELECT TOP ({limit})
+                    HomeworkID,
+                    HomeworkLink,
+                    AnswerKey,
+                    SectionID,
+                    StudentEmail,
+                    StudentUserID,   -- from view
+                    StudentName,
+                    SectionName,
+                    ClassSignupsID
+                FROM {SOURCE_VIEW}
+                WHERE DateGraded IS NULL
+                  AND DateEntered IS NOT NULL
+                  AND StudentName IS NOT NULL
+                ORDER BY DateEntered;
+            """
 
         cursor = conn.cursor()
         cursor.execute(sql)
@@ -93,7 +113,10 @@ def get_ungraded_homeworks(limit=50):
         cursor.close()
         conn.close()
 
-        logging.info(f"📌 Pulled {len(rows)} ungraded homeworks from vw_Homework")
+        if USE_TEST_SOURCE:
+            logging.info(f"📌 Pulled {len(rows)} homeworks from ADF_Homework_test (TEST MODE)")
+        else:
+            logging.info(f"📌 Pulled {len(rows)} ungraded homeworks from vw_Homework")
         return rows
 
     except Exception as e:
