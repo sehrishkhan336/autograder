@@ -1,0 +1,16 @@
+HomeworkID,StudentName,SectionName,OriginalGrade,ManualGrade,AIGrade,AISource,PythonGrade,Flags
+376954,Ahmad Taha,Auditing & Error Handling,5,5,4,OpenAI-agent,5,
+376955,Carla Hope,Parameters,5,2,5,OpenAI-agent,5,AI-FP PY-FP
+376956,Odee Egbuho,Query Editor Features,5,4,5,OpenAI-agent,5,
+376957,Tinotenda Musamba,Data Profiling,5,5,4,OpenAI-agent,5,
+376958,Koffi Kouame,Data Profiling,5,4,3,OpenAI-agent,5,
+376959,Patricia Adewuyi-Tokunbo,Variables,4,4,1,OpenAI-agent,1,AI-FR PY-FR
+376960,Reginald Williams,Joins,4,1,1,OpenAI-agent,1,
+376961,Reginald Williams,Temp Data Structures,4,1,1,OpenAI-agent,1,
+376962,Aster Tadesse,Data Connectivity,4,5,5,OpenAI-agent,4,
+376963,Megan Dimiyo-Mbenoun,IPBC – DBA Roles,4,4,4,OpenAI-agent,4,
+376964,Aster Tadesse,Mobile  App,3,2,2,OpenAI-agent,4,PY-FP
+376965,Patricia Adewuyi-Tokunbo,System Functions,3,3,4,OpenAI-agent,4,
+376966,Saba G,IPBC - Mortgage Project R2:SP5: Story 7,3,1,1,OpenAI-agent,4,PY-FP
+376967,Solome Fentahun,System Functions,3,5,1,OpenAI-agent (fallback),4,AI-FR
+376968,Samerah  Belcher,System Functions,3,3,4,OpenAI-agent,4,
