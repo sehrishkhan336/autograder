@@ -27,7 +27,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
-MAX_AGENT_TURNS = 12  # hard ceiling on tool-use rounds
+MAX_AGENT_TURNS = 15  # bumped from 12
 
 # ============================================================
 # TOOL DEFINITIONS
@@ -240,6 +240,22 @@ GRADING SCALE APPLIED TO SQL:
 - 2 = Few required concepts present, mostly incomplete
 - 1 = No meaningful SQL or format validation failed
 
+========== SCOPE COMPLETENESS CHECK (SQL assignments) ==========
+
+Before grading, count the number of distinct queries in the answer key.
+Then count the distinct queries in the student submission.
+
+Apply these caps based on coverage:
+- Student answered < 80% of required questions → maximum grade is 3.
+- Student answered < 50% of required questions → maximum grade is 2.
+- Student answered 0 questions (empty submission) → grade = 1, escalate = true.
+
+A distinct query is any meaningful SELECT, INSERT, UPDATE, DELETE, or DECLARE
+block separated by semicolons or GO statements.
+
+When a scope cap applies, note it explicitly in escalation_reason:
+"Answer key: N queries. Student answered M of N — grade capped at X."
+
 ========== DOCX GRADING CRITERIA ==========
 
 - Check that key lab steps are documented with screenshots.
@@ -408,6 +424,79 @@ def _make_executor(hw: Dict[str, Any]) -> Tuple[Callable, Callable]:
 # AGENT LOOP
 # ============================================================
 
+def _run_agent_once(
+    client: Any,
+    hwid: Any,
+    openai_messages: list,
+    openai_tools: list,
+    execute_tool: Callable,
+    get_result: Callable,
+) -> Optional[Dict[str, Any]]:
+    """Single agent loop attempt. Returns result dict or None on turn-limit."""
+    for turn in range(MAX_AGENT_TURNS):
+        try:
+            response = client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=openai_messages,
+                tools=openai_tools,
+                tool_choice="auto",
+            )
+        except Exception as e:
+            logger.error(f"HWID {hwid}: OpenAI API error on turn {turn + 1}: {e}")
+            break
+
+        finish_reason = response.choices[0].finish_reason
+        logger.info(f"🤖 Turn {turn + 1} | finish_reason={finish_reason}")
+        assistant_message = response.choices[0].message
+
+        assistant_dict: Dict[str, Any] = {
+            "role": "assistant",
+            "content": assistant_message.content,
+        }
+        if assistant_message.tool_calls:
+            assistant_dict["tool_calls"] = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    },
+                }
+                for tc in assistant_message.tool_calls
+            ]
+        openai_messages.append(assistant_dict)
+
+        if finish_reason == "stop":
+            break
+        if finish_reason != "tool_calls":
+            logger.warning(
+                f"HWID {hwid}: unexpected finish_reason={finish_reason} — stopping."
+            )
+            break
+
+        finalized = False
+        for tc in (assistant_message.tool_calls or []):
+            tool_name = tc.function.name
+            tool_input = json.loads(tc.function.arguments)
+            logger.info(f"🔧 Tool: {tool_name} | input={json.dumps(tool_input)[:300]}")
+            tool_output = execute_tool(tool_name, tool_input)
+            logger.info(f"🔧 Result: {tool_output[:300]}")
+            openai_messages.append({
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": tool_output,
+            })
+            if tool_name == "finalize_grade":
+                finalized = True
+
+        if finalized:
+            logger.info(f"✅ finalize_grade called — exiting agent loop for HWID {hwid}")
+            break
+
+    return get_result()
+
+
 def autograde_homework_agent(hw: Dict[str, Any]) -> Dict[str, Any]:
     """
     Grade a homework submission using an OpenAI tool-use agent loop.
@@ -485,81 +574,40 @@ def autograde_homework_agent(hw: Dict[str, Any]) -> Dict[str, Any]:
 
     logger.info(f"🤖 Agent grading started for HWID {hwid}")
 
-    for turn in range(MAX_AGENT_TURNS):
-        try:
-            response = client.chat.completions.create(
-                model=OPENAI_MODEL,
-                messages=openai_messages,  # type: ignore[arg-type]
-                tools=openai_tools,  # type: ignore[arg-type]
-                tool_choice="auto",
-            )
-        except Exception as e:
-            logger.error(f"HWID {hwid}: OpenAI API error on turn {turn + 1}: {e}")
-            break
+    # First attempt
+    result = _run_agent_once(
+        client, hwid, openai_messages, openai_tools, execute_tool, get_result
+    )
 
-        finish_reason = response.choices[0].finish_reason
-        logger.info(f"🤖 Turn {turn + 1} | finish_reason={finish_reason}")
-
-        assistant_message = response.choices[0].message
-
-        # Build a serializable assistant dict for the history
-        assistant_dict: Dict[str, Any] = {
-            "role": "assistant",
-            "content": assistant_message.content,
-        }
-        if assistant_message.tool_calls:
-            assistant_dict["tool_calls"] = [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.function.name,  # type: ignore[union-attr]
-                        "arguments": tc.function.arguments,  # type: ignore[union-attr]
-                    },
-                }
-                for tc in assistant_message.tool_calls
-            ]
-        openai_messages.append(assistant_dict)
-
-        if finish_reason == "stop":
-            break
-
-        if finish_reason != "tool_calls":
-            logger.warning(
-                f"HWID {hwid}: unexpected finish_reason={finish_reason} — stopping."
-            )
-            break
-
-        # Execute every tool call in this turn; append each result individually
-        finalized = False
-        for tc in (assistant_message.tool_calls or []):
-            tool_name = tc.function.name  # type: ignore[union-attr]
-            tool_input = json.loads(tc.function.arguments)  # type: ignore[union-attr]
-
-            logger.info(f"🔧 Tool: {tool_name} | input={json.dumps(tool_input)[:300]}")
-            tool_output = execute_tool(tool_name, tool_input)
-            logger.info(f"🔧 Result: {tool_output[:300]}")
-
-            openai_messages.append({
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "content": tool_output,
-            })
-
-            if tool_name == "finalize_grade":
-                finalized = True
-
-        if finalized:
-            logger.info(f"✅ finalize_grade called — exiting agent loop for HWID {hwid}")
-            break
-
-    result = get_result()
+    # Single retry on turn-limit or transient failure
     if result is None:
-        logger.error(
-            f"HWID {hwid}: agent finished {MAX_AGENT_TURNS} turns without calling "
-            "finalize_grade — returning fallback."
+        logger.warning(f"HWID {hwid}: first attempt exhausted turns — retrying.")
+        execute_tool2, get_result2 = _make_executor(hw)
+        openai_messages2 = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_message},
+        ]
+        result = _run_agent_once(
+            client, hwid, openai_messages2, openai_tools, execute_tool2, get_result2
         )
-        return fallback
+
+    # Python hybrid fallback if both agent attempts failed
+    if result is None:
+        logger.warning(
+            f"HWID {hwid}: both agent attempts failed — falling back to Python hybrid."
+        )
+        try:
+            from autograde_tools import autograde_homework_hybrid
+            result = autograde_homework_hybrid(hw)
+            result["GradingSource"] = "Python-fallback"
+            logger.info(f"✅ Python fallback grade for HWID {hwid}: {result['grade']}")
+            return result
+        except Exception as e:
+            logger.error(f"HWID {hwid}: Python hybrid fallback also failed: {e}")
+            fallback["escalation_reason"] = (
+                "Agent and Python hybrid both failed — manual review required."
+            )
+            return fallback
 
     logger.info(f"✅ Agent grade for HWID {hwid}: {result['grade']}")
     return result

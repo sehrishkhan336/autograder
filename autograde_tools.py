@@ -113,10 +113,6 @@ def _compare_structure(answer_query: str, student_query: str) -> Tuple[float, Li
     required = _extract_structural_fingerprint(answer_query)
     student = _extract_structural_fingerprint(student_query)
 
-    # Strict COUNT enforcement
-    if required.get("has_count") and not student.get("has_count"):
-        return 0.0, ["missing_count"]
-
     missing = []
     total_required = 0
     satisfied = 0
@@ -241,20 +237,20 @@ def _grade_sql_structural(ans_sql: str, stu_sql: str) -> Dict[str, Any]:
 
 def _map_score_to_grade(score: float) -> int:
     """
-    Thresholds:
-      >= 0.60 → 5
-      >= 0.40 → 4
-      >= 0.20 → 3
-      >= 0.10 → 2
-      else   → 1
+    Thresholds approved by Ali, aligned to rubric:
+      >= 0.75 → 5  (all required concepts satisfied)
+      >= 0.65 → 4  (mostly complete)
+      >= 0.50 → 3  (major parts missing)
+      >= 0.20 → 2  (minimal attempt)
+      else    → 1
     """
-    if score >= 0.60:
+    if score >= 0.75:
         return 5
-    if score >= 0.40:
+    if score >= 0.65:
         return 4
-    if score >= 0.20:
+    if score >= 0.50:
         return 3
-    if score >= 0.10:
+    if score >= 0.20:
         return 2
     return 1
 
@@ -455,11 +451,6 @@ def build_final_comments_and_feedback(
 # ============================================================
 
 def _ai_grade_only(hw: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """
-    Calls OpenAI and returns:
-      {"grade": int|None, "parsed_cleanly": bool, "raw_text": str}
-    Returns None if AI disabled or fails hard.
-    """
     if not ENABLE_AI_GRADING:
         logger.info("🤖 AI grading disabled via ENABLE_AI_GRADING.")
         return None
@@ -467,29 +458,38 @@ def _ai_grade_only(hw: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         logger.warning("🤖 OPENAI_API_KEY missing — AI grading skipped.")
         return None
 
-    prompt = f"""
-You are an experienced instructor grading student homework.
+    stu_zip = download_file(hw.get("HomeworkLink", ""))
+    ans_zip = download_file(hw.get("AnswerKey") or hw.get("Answerkey", ""))
+    stu_sql = extract_sql_from_zip(stu_zip) if stu_zip else ""
+    ans_sql = extract_sql_from_zip(ans_zip) if ans_zip else ""
 
-Return ONLY a single integer from 1 to 5.
-Do NOT explain your answer.
+    if not stu_sql.strip() or not ans_sql.strip():
+        logger.warning("🤖 _ai_grade_only: missing SQL content — skipping AI grade.")
+        return None
 
-Grading philosophy (lenient on minor issues):
-- 5 = Complete and correct (all required tasks present; logic correct)
-- 4 = Mostly complete and correct (all main requirements met; minor mistakes/inefficiencies OK)
-- 3 = Clearly incomplete (major required parts missing OR results largely incorrect)
-- 2 = Minimal attempt (very limited progress)
-- 1 = Empty/placeholder/irrelevant
+    prompt = f"""You are an experienced data analytics instructor grading student SQL homework.
 
-IMPORTANT:
-- If the work looks mostly complete, choose 4 instead of 3.
-- Do NOT drop to 3 for minor syntax, formatting, or inefficiency.
+Return ONLY a single integer from 1 to 5. Do NOT explain your answer.
 
-Homework context:
-HomeworkID: {hw.get("HomeworkID")}
-SectionName: {hw.get("SectionName")}
-HomeworkLink: {hw.get("HomeworkLink")}
-AnswerKey: {hw.get("AnswerKey") or hw.get("Answerkey")}
-""".strip()
+Grading scale:
+- 5 = All required SQL concepts present and logically correct
+- 4 = Mostly complete; all main requirements met; minor mistakes OK
+- 3 = Major required parts missing OR results largely incorrect
+- 2 = Minimal attempt; submission is nearly empty or placeholder
+- 1 = Empty, wrong format, or no meaningful SQL
+
+Grade for CONCEPT COVERAGE, not answer-key matching. The student may solve
+the problem any valid way. Verify required SQL concepts (JOINs, GROUP BY,
+aggregates, subqueries, etc.) are present and correctly used based on what
+the answer key requires.
+
+ANSWER KEY SQL:
+{ans_sql[:3000]}
+
+STUDENT SUBMISSION SQL:
+{stu_sql[:3000]}
+
+Return only the integer grade (1-5):""".strip()
 
     try:
         payload = {
@@ -502,7 +502,6 @@ AnswerKey: {hw.get("AnswerKey") or hw.get("Answerkey")}
             "Authorization": f"Bearer {OPENAI_API_KEY}",
             "Content-Type": "application/json",
         }
-
         logger.info("🤖 Calling OpenAI for grade-only evaluation…")
         response = requests.post(
             OPENAI_RESPONSES_URL,
@@ -516,7 +515,6 @@ AnswerKey: {hw.get("AnswerKey") or hw.get("Answerkey")}
         text_candidates: List[str] = []
         if isinstance(data.get("output_text"), str):
             text_candidates.append(data["output_text"])
-
         for item in data.get("output", []):
             for content in item.get("content", []):
                 if isinstance(content, dict) and "text" in content:

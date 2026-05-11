@@ -56,9 +56,18 @@ def extract_sql_from_zip(zip_path: Optional[str]) -> str:
         return ""
     try:
         with zipfile.ZipFile(zip_path, "r") as z:
-            for name in z.namelist():
-                if name.lower().endswith(".sql"):
-                    return z.open(name).read().decode(errors="ignore")
+            sql_files = sorted(
+                name for name in z.namelist()
+                if name.lower().endswith(".sql")
+            )
+            if not sql_files:
+                return ""
+            parts = []
+            for name in sql_files:
+                content = z.open(name).read().decode(errors="ignore")
+                if content.strip():
+                    parts.append(f"-- File: {name}\n{content}")
+            return "\n\n".join(parts)
     except Exception:
         pass
     return ""
