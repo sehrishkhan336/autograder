@@ -1,0 +1,141 @@
+Detailed file map: see Section 7.
+
+### 4.2 CI/CD Pipeline
+Per the QA strategy in project instructions:
+- GitHub Actions workflow on every push to main and PRs
+- Required gates: `ruff check`, `pytest tests/unit`, `pytest tests/integration`, `pytest --cov --cov-fail-under=80`
+- Nightly schedule for e2e tests (excluded from per-push to keep PRs fast)
+- Failing checks block merge
+
+### 4.3 Testing Pyramid Implementation
+The QA strategy in project instructions is the authoritative spec. This kickoff does not restate it; treat that section as the contract.
+
+Phase 3 implementation order:
+1. Build the golden dataset (`tests/fixtures/golden/`) — 33 fixtures minimum
+2. Wire test discovery to the new directory layout
+3. Backfill unit tests to 80% coverage
+4. Backfill integration tests covering router + agent loop + DB layer happy & error paths
+5. Build e2e tests using golden dataset + email sandbox
+6. Document bug triage protocol in CONTRIBUTING.md
+
+### 4.4 Production Rollout
+Test → production cutover is a staged process, not a flip.
+
+| Stage | Duration | Activity | Exit gate |
+|---|---|---|---|
+| Soak | 1 week | Continue writing to TEST tables only; verify zero regressions on live volume | No new false rejects, no schema errors |
+| Dual-write | 1 week | Write to TEST and PROD tables in parallel; compare nightly | Daily diff = empty |
+| PROD-primary | 2 weeks | Write to PROD; TEST table archived weekly | Stable for 14 days |
+| TEST-decommission | — | Drop TEST tables; archive shadow log | Ali sign-off |
+
+### 4.5 Operational Maturity
+- Runbook: `docs/RUNBOOK.md` — common failure modes and recovery steps
+- Monitoring: nightly job emails a "yesterday's batch" digest to Ali
+- Alerting: when agreement rate drops below baseline OR false rejects exceed zero, send Slack/email alert
+- On-call: define who responds to alerts during business hours
+
+---
+
+## 5. Out of Scope (anti-scope-creep)
+
+| Item | Rationale |
+|---|---|
+| Removing the Python shadow validator | Permanent per Phase 2 architecture decision |
+| Rebuilding any working Phase 1 or 2 component | If it works, leave it |
+| Adding new grading features (new file types, multi-language) | Separate roadmap item, not Phase 3 |
+| UI / web dashboard | No UI exists; not needed at current scale |
+| Performance or load testing | Volume doesn't warrant it |
+| Security pen testing | SQL is parameterized; sufficient for current scope |
+| Browser / accessibility testing | No UI |
+
+---
+
+## 6. Risk Register
+
+| Risk | Likelihood | Impact | Mitigation |
+|---|:---:|:---:|---|
+| Import refactor breaks existing entry points | Medium | High | Restructure in one PR; run full pytest + manual smoke test before merge |
+| Production cutover surfaces TEST-only assumptions | Medium | High | Dual-write stage explicitly catches this |
+| Latent bugs (STUDENT_EMAIL placeholder etc.) ship to prod | Low if checklist enforced | Critical | Entry Criterion #7 + manual smoke test in PR description |
+| CI false positives slow the team | Medium | Medium | Allow `[skip ci]` for docs-only PRs; tune ruff to project style |
+| Schema migration on PROD tables | Low | High | Migrations live in `db/migrations/` and run via reviewed script, never ad-hoc |
+
+---
+
+## 7. Day-1 Backlog — Repo Restructure
+
+Concrete file moves (do all in a single PR titled `chore(repo): Phase 3 restructure`):
+
+| Current path | New path | Notes |
+|---|---|---|
+| `autograde_agent.py` | `src/autograde_agent.py` | |
+| `autograde_tools.py` | `src/autograde_tools.py` | |
+| `db_tools.py` | `src/db_tools.py` | |
+| `email_tools.py` | `src/email_tools.py` | |
+| `file_tools.py` | `src/file_tools.py` | |
+| `run_batch.py` | `scripts/run_batch.py` | Update imports |
+| `regrade_flagged.py` | `scripts/regrade_flagged.py` | Update imports |
+| `review_rejects.py` | `scripts/review_rejects.py` | Update imports |
+| `analyze_shadow_log.py` | `scripts/analyze_shadow_log.py` | |
+| `benchmark_three_way.py` | `benchmarks/run_three_way.py` | |
+| `benchmark_truth.csv` | `benchmarks/truth.csv` | |
+| `benchmark_history.csv` | `benchmarks/history/history.csv` | |
+| `benchmark_history/` | `benchmarks/history/` | |
+| `benchmark_three_way_results.csv` (root) | `benchmarks/history/latest/three_way_results.csv` | |
+| `tests/test_autograde_tools.py` | `tests/unit/test_autograde_tools.py` | |
+| `PRODUCTION_READY.md` | `docs/PRODUCTION_READY.md` | |
+| `LATEST_BENCHMARK.md` | `docs/LATEST_BENCHMARK.md` | |
+| `morning_brief.md` | `docs/morning_brief.md` | |
+| `benchmark_agent.py` | **DELETE** | Deprecated by `benchmark_three_way.py` |
+| `bash.exe.stackdump` | **DELETE** | Crash artifact |
+
+New files to create:
+- `pyproject.toml` — replace any setup.py / requirements approach; defines package layout
+- `src/router.py` — extract routing logic from `run_batch.py` and `regrade_flagged.py`
+- `tests/__init__.py`, `tests/unit/__init__.py`, etc. — proper package markers
+- `docs/CHANGELOG.md` — start tracking from Phase 3 forward
+- `docs/RUNBOOK.md` — operational guide
+- `docs/CONTRIBUTING.md` — bug triage + PR checklist
+- `.github/workflows/ci.yml` — GitHub Actions pipeline
+
+Import updates required after move:
+- Every `from autograde_agent import ...` → `from src.autograde_agent import ...` (or use `pyproject.toml` to make `src/` the package root and keep imports flat)
+- Update all entry-point invocations in scripts to use `python -m scripts.run_batch` or document a launcher
+
+---
+
+## 8. Exit Criteria for Phase 3
+
+Phase 3 closes when all of these are true:
+
+| # | Criterion |
+|---|---|
+| 1 | Repo restructure complete and merged |
+| 2 | CI pipeline green on main for 7 consecutive days |
+| 3 | Test coverage ≥ 80% on `src/` |
+| 4 | Golden dataset has ≥33 fixtures across all categories per QA strategy |
+| 5 | Production cutover stages complete (Soak → Dual-write → PROD-primary → TEST-decommission) |
+| 6 | Runbook, changelog, contributing guide all in place |
+| 7 | One full week of zero false rejects in production |
+| 8 | Ali signs off on production state |
+
+---
+
+## 9. Open Questions for Ali
+
+Before Phase 3 starts, get answers on:
+
+1. Is the within-1 ≥ 90% target an acceptable substitute for exact-match ≥ 90% at the Sprint 4 gate?
+2. Who is the on-call backup when Sehrish is unavailable?
+3. Should the dual-write stage compare AI grade or final grade?
+4. Are there schema changes needed on PROD tables (e.g. Confidence column) or do they already exist?
+5. What's the policy when AI and Python disagree by 2+ grades in production — auto-escalate, or use AI grade with logging?
+
+---
+
+## 10. References
+
+- Project instructions § "QA TESTING STRATEGY — PHASE 3"
+- `docs/PRODUCTION_READY.md` (when populated)
+- Sprint 4 benchmark results: `benchmarks/history/<latest>/`
+- Phase 2 sign-off email from Ali

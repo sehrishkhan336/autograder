@@ -181,9 +181,9 @@ SYSTEM_PROMPT = """You are an expert data analytics instructor grading student h
 
 - Answer key requires .sql AND student has zero .sql files → grade=1, escalate=true.
 - Answer key requires .docx AND student has zero .docx files → grade=1, escalate=true.
-- All SQL content across every submitted file is empty → grade=1, escalate=true.
-- Multiple .sql files are ACCEPTABLE — read and grade them together as one submission.
-- Multiple .docx files are ACCEPTABLE — review all of them together.
+- All SQL content is empty → grade=1, escalate=true.
+- Student submitted MORE THAN ONE .sql file → grade=1, escalate=true. Reason: "Multiple SQL files submitted; submission must contain exactly one .sql file."
+- Student submitted MORE THAN ONE .docx file → grade=1, escalate=true. Reason: "Multiple DOCX files submitted; submission must contain exactly one .docx file."
 
 ========== GRADING SCALE ==========
 
@@ -365,15 +365,38 @@ def _make_executor(hw: Dict[str, Any]) -> Tuple[Callable, Callable]:
                     "valid": False,
                     "error": "fetch_submission and fetch_answer_key must be called first."
                 })
-            stu_exts = set(inspect_zip_extensions(stu_zip))
-            ans_exts = set(inspect_zip_extensions(ans_zip))
-            required = ans_exts & {"sql", "docx"}
-            missing = sorted(required - stu_exts)
+            stu_exts_list = inspect_zip_extensions(stu_zip)
+            stu_exts_set = set(stu_exts_list)
+            ans_exts_set = set(inspect_zip_extensions(ans_zip))
+            required = ans_exts_set & {"sql", "docx"}
+            missing = sorted(required - stu_exts_set)
+
+            # One-file-per-type policy enforcement
+            sql_count = stu_exts_list.count("sql")
+            docx_count = stu_exts_list.count("docx")
+            multiple_sql = "sql" in required and sql_count > 1
+            multiple_docx = "docx" in required and docx_count > 1
+
+            rejection_reasons = []
+            if multiple_sql:
+                rejection_reasons.append(
+                    f"Multiple SQL files submitted ({sql_count}); exactly one required."
+                )
+            if multiple_docx:
+                rejection_reasons.append(
+                    f"Multiple DOCX files submitted ({docx_count}); exactly one required."
+                )
+
             return json.dumps({
-                "valid": len(missing) == 0,
+                "valid": (len(missing) == 0) and not multiple_sql and not multiple_docx,
                 "required_types": sorted(required),
-                "student_types": sorted(stu_exts),
+                "student_types": sorted(stu_exts_set),
                 "missing_types": missing,
+                "sql_file_count": sql_count,
+                "docx_file_count": docx_count,
+                "multiple_sql_files": multiple_sql,
+                "multiple_docx_files": multiple_docx,
+                "rejection_reason": "; ".join(rejection_reasons) if rejection_reasons else None,
             })
 
         # ── finalize_grade ──────────────────────────────────────────────

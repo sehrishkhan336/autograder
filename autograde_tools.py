@@ -795,6 +795,23 @@ def autograde_homework(hw: Dict[str, Any]) -> Dict[str, Any]:
             }
             return _apply_performance_escalation(hw, base)
 
+        # One-file-per-type policy: multiple .sql files → reject
+        sql_count = stu_exts.count("sql") if isinstance(stu_exts, list) else 1
+        if sql_count > 1:
+            base = {
+                "grade": 1,
+                "assignment_type": "sql",
+                "structural_valid": False,
+                "sql_missing_ops": [],
+                "sql_partial_ops": [],
+                "escalate": True,
+                "escalation_reason": (
+                    f"Multiple SQL files submitted ({sql_count}); submission must "
+                    "contain exactly one .sql file — manual review required."
+                ),
+            }
+            return _apply_performance_escalation(hw, base)
+
         stu_sql = extract_sql_from_zip(stu_zip)
         ans_sql = extract_sql_from_zip(ans_zip)
 
@@ -842,6 +859,23 @@ def autograde_homework(hw: Dict[str, Any]) -> Dict[str, Any]:
     # DOCX / SCREENSHOT or PARAGRAPH assignments
     # --------------------------------------------------------
     if "docx" in ans_exts or "docx" in stu_exts:
+        # One-file-per-type policy: multiple .docx files → reject
+        docx_count = stu_exts.count("docx") if isinstance(stu_exts, list) else 1
+        if docx_count > 1:
+            base = {
+                "grade": 1,
+                "assignment_type": "docx",
+                "structural_valid": False,
+                "screenshot_count": 0,
+                "paragraph_count": 0,
+                "escalate": True,
+                "escalation_reason": (
+                    f"Multiple DOCX files submitted ({docx_count}); submission must "
+                    "contain exactly one .docx file — manual review required."
+                ),
+            }
+            return _apply_performance_escalation(hw, base)
+
         # Decide paragraph vs screenshot:
         # If docx exists but no screenshots, treat as paragraph-based (presence only)
         text, img_count = _extract_docx_from_zip(stu_zip)

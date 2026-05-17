@@ -1,0 +1,23 @@
+ DONE (11)
+
+Phase 1 Python grader shipped to production
+AI agent built with 5 tools (incl. validate_with_python)
+Python elevated to permanent shadow validator role
+SQL grading upgraded to concept-coverage
+Test tables isolated from production
+74 unit tests passing (asterisk: COUNT test needs verification per audit)
+Email rendering and escalation logic fixed
+Task 1 — Retry + Python hybrid fallback in agent loop
+Bug 3 — Hybrid try/except protects Python grade from AI advisory crashes
+Grade 3 escalation — routes to reject table + instructor escalation (no student email)
+validate_with_python callback tool — wired into agent
+
+🔄 TO DO (7)
+
+Task 2 — HWID 376959 multi-file SQL extraction bug (needs file_tools.py)
+Task 3 — HWID 376955 scope-counting prompt fix
+Re-run benchmark to validate Bug 3 + grade-3 routing fixes
+Persist confidence score to DB (schema + insert + shadow log)
+Add Agent vs Hybrid delta alerting
+Document production readiness criteria (verify PRODUCTION_READY.md contents match Sprint 4 exit criteria)
+Analyze a real shadow log run with analyze_shadow_log.py
