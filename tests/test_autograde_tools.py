@@ -184,9 +184,16 @@ class TestGradeSqlStructural:
         assert result["grade"] <= 2
         assert result["escalate"] is True
 
-    def test_escalate_is_false_when_grade_ge_3(self):
+    def test_escalate_is_true_when_grade_equals_3(self):
+        # New rule: grade 3 is treated as a reject — escalate is True
         result = _grade_sql_structural(SQL_ANS_AGGREGATE, SQL_STUDENT_PARTIAL)
-        assert result["grade"] >= 3
+        assert result["grade"] == 3
+        assert result["escalate"] is True
+
+    def test_escalate_is_false_when_grade_ge_4(self):
+        # New rule: only grades 4 and 5 do not escalate
+        result = _grade_sql_structural(SQL_FULL, SQL_STUDENT_FULL_MATCH)
+        assert result["grade"] >= 4
         assert result["escalate"] is False
 
 
