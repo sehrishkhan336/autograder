@@ -225,9 +225,9 @@ def _grade_sql_structural(ans_sql: str, stu_sql: str) -> Dict[str, Any]:
     return {
         "grade": grade,
         "structural_valid": True,
-        "escalate": grade <= 2,
+        "escalate": grade <= 3,
         "escalation_reason": (
-            "Structural SQL requirements not satisfied." if grade <= 2 else None
+            "Structural SQL requirements not fully satisfied — instructor review required." if grade <= 3 else None
         ),
         "score": overall_score,
         "sql_missing_ops": list(set(all_missing)),
@@ -959,7 +959,7 @@ def autograde_homework_hybrid(hw: Dict[str, Any]) -> Dict[str, Any]:
             final_grade = ai_grade
             grading_source = "AI-primary"
 
-    escalate = final_grade <= 2
+    escalate = final_grade <= 3
     if not escalate:
         escalation_reason = None
 

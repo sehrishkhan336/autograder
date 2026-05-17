@@ -78,8 +78,8 @@ def send_feedback_email(hw, grade, comments_html, feedback_html):
     Instructor escalation is handled by send_escalation_email().
     """
 
-    # 🔒 HARD GUARDRAIL — never email grades 1–2
-    if int(grade) <= 2:
+    # 🔒 HARD GUARDRAIL — never email grades 1–3 (grade 3 now treated as reject)
+    if int(grade) <= 3:
         print(f"🚫 Student email BLOCKED by guardrail (grade={grade})")
         return
 

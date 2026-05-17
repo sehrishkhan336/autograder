@@ -99,8 +99,8 @@ def main():
 
             rejected += 1
 
-        # 🚫 Low grades → reject table
-        elif grade <= 2:
+        # 🚫 Below-passing grades → reject table
+        elif grade <= 3:
             print(f"🚨  HWID {hwid} | Grade {grade} | REJECTED | {escalation_reason}")
 
             inserted = insert_rejected_homework(

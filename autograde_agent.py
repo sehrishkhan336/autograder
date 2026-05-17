@@ -264,8 +264,10 @@ When a scope cap applies, note it explicitly in escalation_reason:
 
 ========== ESCALATION RULES (critical) ==========
 
-- escalate=true ONLY when final grade is 1 or 2.
-- NEVER escalate grade 3, 4, or 5 — grade 3+ means the student did meaningful work.
+- escalate=true when final grade is 1, 2, or 3.
+- Grade 3 is below the curriculum's passing threshold — student work is incomplete enough to require instructor review before any feedback is sent.
+- NEVER escalate grade 4 or 5.
+- When escalating, always provide a clear, specific escalation_reason explaining what is missing or incorrect.
 
 ========== STUDENT-FACING RULES (critical) ==========
 
@@ -380,7 +382,7 @@ def _make_executor(hw: Dict[str, Any]) -> Tuple[Callable, Callable]:
             grade = max(1, min(5, int(raw_grade)))
             escalate = bool(tool_input.get("escalate", False))
             # Enforce escalation for very low grades
-            if grade <= 2:
+            if grade <= 3:
                 escalate = True
             raw_confidence = tool_input.get("confidence", 0.5)
             confidence = max(0.0, min(1.0, float(raw_confidence)))
