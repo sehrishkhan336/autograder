@@ -924,8 +924,13 @@ def autograde_homework_hybrid(hw: Dict[str, Any]) -> Dict[str, Any]:
     # ----------------------------------------------------
     # 2️⃣ AI advisory grading (ONLY if structure is valid)
     # ----------------------------------------------------
-    ai_result = _ai_grade_only(hw)
-    ai_grade = _ai_grade_to_int(ai_result)
+    try:
+        ai_result = _ai_grade_only(hw)
+        ai_grade = _ai_grade_to_int(ai_result)
+    except Exception as e:
+        logger.warning(f"🤖 AI advisory step failed for HWID {hw.get('HomeworkID')}: {e} — proceeding with Python grade only.")
+        ai_result = None
+        ai_grade = None
 
     # ----------------------------------------------------
     # 3️⃣ AI advisory grade computed above (used for logging)
