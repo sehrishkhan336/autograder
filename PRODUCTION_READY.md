@@ -55,8 +55,8 @@ from `run_batch.py`. No single criterion can be waived independently.
 ### 4. All Confidence Scores Logged for Analysis
 
 - Every row written to `ADF_Homework_test` or `ADF_Homework_Autograder_Rejects_test`
-  must include a `confidence` value (0.0–1.0) from `finalize_grade`.
-- Verify by querying both test tables: `SELECT COUNT(*) WHERE confidence IS NULL`
+  must include an `AIConfidence` value (0.0–1.0) from `finalize_grade`.
+- Verify by querying both test tables: `SELECT COUNT(*) WHERE AIConfidence IS NULL`
   must return 0.
 - Additionally, review the confidence distribution: if more than 20% of
   submissions score ≤ 0.5, flag for review before proceeding.

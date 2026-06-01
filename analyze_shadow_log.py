@@ -6,7 +6,7 @@ Usage:
     python analyze_shadow_log.py <path-to-log-file>
 
 Reads the log produced by run_batch.py. Shadow lines have the format:
-    🔬  Shadow: Agent=<N> | Hybrid=<N> | Delta=<+/-N>
+    🔬  Shadow: Agent=<N> | Hybrid=<N> | Delta=<+/-N> | AgentConfidence=<N> | HybridConfidence=<N>
 
 HWID is inferred from the preceding context line:
     ➡️  HWID <N> | <StudentName> | <SectionName>
@@ -17,6 +17,7 @@ Read-only. Does not modify the log file or database.
 import re
 import sys
 from collections import defaultdict
+from typing import Optional
 
 
 # ------------------------------------------------------------
@@ -28,6 +29,7 @@ RE_HWID   = re.compile(r"HWID\s+(\d+)")
 # Matches:  🔬  Shadow: Agent=4 | Hybrid=3 | Delta=-1
 RE_SHADOW = re.compile(
     r"Shadow:\s+Agent=(\d+)\s*\|?\s*Hybrid=(\d+)\s*\|?\s*Delta=([+-]?\d+)"
+    r"(?:\s*\|?\s*AgentConfidence=([0-9.]+|None)\s*\|?\s*HybridConfidence=([0-9.]+|None))?"
 )
 
 
@@ -60,6 +62,8 @@ def parse_log(path: str) -> list[dict]:
                         "agent_grade":  agent_grade,
                         "hybrid_grade": hybrid_grade,
                         "delta":        delta,
+                        "agent_confidence": _parse_confidence(shadow_match.group(4)),
+                        "hybrid_confidence": _parse_confidence(shadow_match.group(5)),
                     })
 
     except FileNotFoundError:
@@ -70,6 +74,15 @@ def parse_log(path: str) -> list[dict]:
         sys.exit(1)
 
     return records
+
+
+def _parse_confidence(value: Optional[str]) -> Optional[float]:
+    if value in (None, "None"):
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
 
 
 # ------------------------------------------------------------
@@ -151,6 +164,18 @@ def print_report(records: list[dict], groups: dict[str, list[dict]]) -> None:
     hybrid_higher = sum(1 for r in records if r["delta"] < 0)
     tied          = sum(1 for r in records if r["delta"] == 0)
     print(f"Agent higher: {agent_higher} | Hybrid higher: {hybrid_higher} | Tied: {tied}")
+
+    agent_confidences = [
+        r["agent_confidence"] for r in records if r.get("agent_confidence") is not None
+    ]
+    low_confidence = [c for c in agent_confidences if c <= 0.5]
+    if agent_confidences:
+        avg_confidence = sum(agent_confidences) / len(agent_confidences)
+        low_rate = len(low_confidence) / len(agent_confidences) * 100
+        print(
+            f"Agent confidence avg: {avg_confidence:.2f} | "
+            f"<=0.5: {low_rate:.1f}% ({len(low_confidence)}/{len(agent_confidences)})"
+        )
     print("═" * 64)
 
 

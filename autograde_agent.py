@@ -545,6 +545,7 @@ def autograde_homework_agent(hw: Dict[str, Any]) -> Dict[str, Any]:
         ),
         "escalate": True,
         "escalation_reason": "Agent grading failed — manual review required.",
+        "confidence": 0.0,
         "GradingSource": "OpenAI-agent (fallback)",
     }
 
@@ -625,6 +626,7 @@ def autograde_homework_agent(hw: Dict[str, Any]) -> Dict[str, Any]:
             from autograde_tools import autograde_homework_hybrid
             result = autograde_homework_hybrid(hw)
             result["GradingSource"] = "Python-fallback"
+            result.setdefault("confidence", 0.5)
             logger.info(f"✅ Python fallback grade for HWID {hwid}: {result['grade']}")
             return result
         except Exception as e:
@@ -635,4 +637,5 @@ def autograde_homework_agent(hw: Dict[str, Any]) -> Dict[str, Any]:
             return fallback
 
     logger.info(f"✅ Agent grade for HWID {hwid}: {result['grade']}")
+    result.setdefault("confidence", 0.5)
     return result

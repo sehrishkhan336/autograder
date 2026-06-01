@@ -8,6 +8,7 @@ load_dotenv()
 
 REJECT_TABLE = "ADF_Homework_Autograder_Rejects"
 REJECT_TEST_TABLE = "ADF_Homework_Autograder_Rejects_test"
+MAIN_TEST_TABLE = "ADF_Homework_test"
 
 # ---------------------------------------------------------------------
 # Load DB credentials
@@ -20,7 +21,7 @@ DB_TRUSTED = os.getenv("DB_TRUSTED", "no").lower() == "yes"
 USE_TEST_SOURCE = os.getenv("USE_TEST_SOURCE", "no").lower() == "yes"
 
 SOURCE_VIEW = "vw_Homework"        # read-only view
-TEST_TABLE = "ADF_Homework_test"   # write-only table
+TEST_TABLE = MAIN_TEST_TABLE       # write-only table
 
 IGNORE_SOURCE_FILTERS = os.getenv("IGNORE_SOURCE_FILTERS", "no").lower() == "yes"
 
@@ -48,16 +49,42 @@ def get_connection():
             )
 
         conn = pyodbc.connect(conn_str)
-        logging.info(f"✅ Connected to {DB_SERVER}/{DB_DATABASE}")
+        logging.info(f"âœ… Connected to {DB_SERVER}/{DB_DATABASE}")
         return conn
 
     except Exception as e:
-        logging.error(f"❌ DB connection failed: {e}")
+        logging.error(f"âŒ DB connection failed: {e}")
         return None
 
 
+def _normalize_confidence(confidence):
+    """Return confidence as a 0.0-1.0 float, defaulting unknown values to 0.0."""
+    if confidence is None:
+        return 0.0
+    try:
+        return max(0.0, min(1.0, float(confidence)))
+    except (TypeError, ValueError):
+        logging.warning(f"Invalid AI confidence ignored: {confidence!r}")
+        return 0.0
+
+
+def _ensure_ai_confidence_column(cursor, table_name):
+    """
+    Ensure a nullable AIConfidence column exists before inserting.
+    This keeps test-table schema drift from breaking batch persistence.
+    """
+    sql = f"""
+        IF COL_LENGTH('dbo.{table_name}', 'AIConfidence') IS NULL
+        BEGIN
+            ALTER TABLE dbo.{table_name}
+            ADD AIConfidence FLOAT NULL;
+        END
+    """
+    cursor.execute(sql)
+
+
 # ---------------------------------------------------------------------
-# 1️⃣ Fetch Ungraded Homeworks (MINIMAL fields only)
+# 1ï¸âƒ£ Fetch Ungraded Homeworks (MINIMAL fields only)
 # ---------------------------------------------------------------------
 def get_ungraded_homeworks(limit=50):
     """Returns rows for autograder. Source switches on USE_TEST_SOURCE env flag."""
@@ -114,18 +141,18 @@ def get_ungraded_homeworks(limit=50):
         conn.close()
 
         if USE_TEST_SOURCE:
-            logging.info(f"📌 Pulled {len(rows)} homeworks from ADF_Homework_test (TEST MODE)")
+            logging.info(f"ðŸ“Œ Pulled {len(rows)} homeworks from ADF_Homework_test (TEST MODE)")
         else:
-            logging.info(f"📌 Pulled {len(rows)} ungraded homeworks from vw_Homework")
+            logging.info(f"ðŸ“Œ Pulled {len(rows)} ungraded homeworks from vw_Homework")
         return rows
 
     except Exception as e:
-        logging.error(f"❌ Error fetching from vw_Homework: {e}")
+        logging.error(f"âŒ Error fetching from vw_Homework: {e}")
         return []
 
 
 # ---------------------------------------------------------------------
-# 2️⃣ Insert Graded Result into ADF_Homework_test (Production-Ready)
+# 2ï¸âƒ£ Insert Graded Result into ADF_Homework_test (Production-Ready)
 # ---------------------------------------------------------------------
 def update_database_grade(
     homework_id,
@@ -135,21 +162,24 @@ def update_database_grade(
     escalate,
     escalation_reason,
     grading_source=None,
-    hw=None
+    hw=None,
+    confidence=None,
 ):
     """Inserts graded homework into ADF_Homework_test table."""
     try:
         hw = hw or {}
+        confidence = _normalize_confidence(confidence)
 
         conn = get_connection()
         cursor = conn.cursor()
+        _ensure_ai_confidence_column(cursor, MAIN_TEST_TABLE)
 
         if grade >= 4:
-            flag_color = "🟢"
+            flag_color = "ðŸŸ¢"
         elif grade == 3:
-            flag_color = "🟡"
+            flag_color = "ðŸŸ¡"
         else:
-            flag_color = "🔴"
+            flag_color = "ðŸ”´"
 
         sql = """
             INSERT INTO dbo.ADF_Homework_test (
@@ -167,9 +197,10 @@ def update_database_grade(
                 GradingSource,
                 EscalationReason,
                 EscalateFlag,
+                AIConfidence,
                 DateProcessed
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE());
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE());
         """
 
         params = (
@@ -186,7 +217,8 @@ def update_database_grade(
             feedback,
             grading_source,
             escalation_reason,
-            int(escalate)
+            int(escalate),
+            confidence,
         )
 
         cursor.execute(sql, params)
@@ -194,10 +226,10 @@ def update_database_grade(
         cursor.close()
         conn.close()
 
-        logging.info(f"📌 Inserted HWID {homework_id} into ADF_Homework_test")
+        logging.info(f"ðŸ“Œ Inserted HWID {homework_id} into ADF_Homework_test")
 
     except Exception as e:
-        logging.error(f"❌ DB insert error for HWID {homework_id}: {e}")
+        logging.error(f"âŒ DB insert error for HWID {homework_id}: {e}")
 
 
 def insert_rejected_homework(
@@ -208,17 +240,20 @@ def insert_rejected_homework(
     escalate,
     escalation_reason,
     grading_source=None,
-    hw=None
+    hw=None,
+    confidence=None,
 ):
     """
-    Inserts grade 1–2 homework into ADF_Homework_Autograder_Rejects.
+    Inserts grade 1â€“2 homework into ADF_Homework_Autograder_Rejects.
     Safe to re-run batch multiple times (idempotent).
     """
     try:
         hw = hw or {}
+        confidence = _normalize_confidence(confidence)
 
         conn = get_connection()
         cursor = conn.cursor()
+        _ensure_ai_confidence_column(cursor, REJECT_TEST_TABLE)
 
         # -------------------------------------------------
         # Idempotency check (HomeworkID + StudentUserID)
@@ -237,7 +272,7 @@ def insert_rejected_homework(
 
         if cursor.fetchone():
             logging.warning(
-                f"⚠️ Duplicate reject skipped for HWID {homework_id} "
+                f"âš ï¸ Duplicate reject skipped for HWID {homework_id} "
                 f"(StudentUserID={hw.get('StudentUserID')})"
             )
             cursor.close()
@@ -264,9 +299,10 @@ def insert_rejected_homework(
                 GradingSource,
                 Escalate,
                 EscalationReason,
+                AIConfidence,
                 DateProcessed
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE());
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE());
         """
 
         params = (
@@ -284,7 +320,8 @@ def insert_rejected_homework(
             feedback,
             grading_source,
             int(escalate),
-            escalation_reason
+            escalation_reason,
+            confidence,
         )
 
         cursor.execute(sql, params)
@@ -293,14 +330,14 @@ def insert_rejected_homework(
         conn.close()
 
         logging.info(
-            f"🚫 HWID {homework_id} inserted into {REJECT_TEST_TABLE} "
+            f"ðŸš« HWID {homework_id} inserted into {REJECT_TEST_TABLE} "
             f"(grade={grade}, escalated)"
         )
         return True
 
     except Exception as e:
         logging.error(
-            f"❌ Reject insert failed for HWID {homework_id}: {e}"
+            f"âŒ Reject insert failed for HWID {homework_id}: {e}"
         )
         return False
 # ----------------------------------------------------------------------

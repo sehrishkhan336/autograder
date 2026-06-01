@@ -50,6 +50,7 @@ def main():
         escalate          = result.get("escalate", False)
         escalation_reason = result.get("escalation_reason")
         grading_source    = result.get("GradingSource", "Python")
+        confidence        = result.get("confidence")
 
         # ----------------------------------------------------
         # 2️⃣ Hybrid grader (shadow run — comparison only)
@@ -58,7 +59,12 @@ def main():
             hybrid_result = autograde_homework_hybrid(hw)
             hybrid_grade  = int(hybrid_result.get("grade", 1))
             delta         = hybrid_grade - grade
-            print(f"🔬  Shadow: Agent={grade} | Hybrid={hybrid_grade} | Delta={delta:+d}")
+            hybrid_confidence = hybrid_result.get("confidence")
+            print(
+                f"🔬  Shadow: Agent={grade} | Hybrid={hybrid_grade} | "
+                f"Delta={delta:+d} | AgentConfidence={confidence} | "
+                f"HybridConfidence={hybrid_confidence}"
+            )
         except Exception:
             pass
 
@@ -86,7 +92,8 @@ def main():
                 escalate=True,
                 escalation_reason=reason,
                 grading_source=grading_source,
-                hw=hw
+                hw=hw,
+                confidence=confidence,
             )
 
             if inserted:
@@ -111,7 +118,8 @@ def main():
                 escalate=True,
                 escalation_reason=escalation_reason,
                 grading_source=grading_source,
-                hw=hw
+                hw=hw,
+                confidence=confidence,
             )
 
             if inserted:
@@ -132,7 +140,8 @@ def main():
                 escalate=escalate,
                 escalation_reason=escalation_reason,
                 grading_source=grading_source,
-                hw=hw
+                hw=hw,
+                confidence=confidence,
             )
 
             if escalate:

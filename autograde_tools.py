@@ -544,6 +544,27 @@ def _ai_grade_to_int(ai_result: Optional[Dict[str, Any]]) -> Optional[int]:
     except Exception:
         return None
 
+
+def _estimate_confidence_from_grades(
+    python_grade: int,
+    ai_grade: Optional[int],
+    structural_valid: bool,
+) -> float:
+    """
+    Fallback confidence for non-agent paths.
+    Agent results use finalize_grade confidence; this keeps rollback/fallback writes non-null.
+    """
+    if not structural_valid:
+        return 0.9
+    if ai_grade is None:
+        return 0.7
+    delta = abs(ai_grade - python_grade)
+    if delta == 0:
+        return 0.9
+    if delta == 1:
+        return 0.75
+    return 0.5
+
 # ============================================================
 # DELTA LOGGING + RECONCILIATION (FIXED)
 # ============================================================
@@ -950,6 +971,9 @@ def autograde_homework_hybrid(hw: Dict[str, Any]) -> Dict[str, Any]:
             "feedback_html": feedback_html,
             "escalate": bool(py_result.get("escalate", False)),
             "escalation_reason": py_result.get("escalation_reason"),
+            "confidence": _estimate_confidence_from_grades(
+                python_grade, None, structural_valid=False
+            ),
             "python_grade": python_grade,
             "ai_grade": None,
             "assignment_type": assignment_type,
@@ -1019,6 +1043,9 @@ def autograde_homework_hybrid(hw: Dict[str, Any]) -> Dict[str, Any]:
         "feedback_html": feedback_html,
         "escalate": escalate,
         "escalation_reason": escalation_reason,
+        "confidence": _estimate_confidence_from_grades(
+            python_grade, ai_grade, structural_valid=True
+        ),
         "python_grade": python_grade,
         "ai_grade": ai_grade,
         "assignment_type": assignment_type,

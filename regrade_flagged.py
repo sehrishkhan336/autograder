@@ -94,6 +94,7 @@ def main():
         escalate          = result.get("escalate", False)
         escalation_reason = result.get("escalation_reason")
         grading_source    = result.get("GradingSource", "Python")
+        confidence        = result.get("confidence")
 
         # --------------------------------------------------------
         # 2️⃣ Clean HTML for DB storage
@@ -119,6 +120,7 @@ def main():
                 escalation_reason=reason,
                 grading_source=grading_source,
                 hw=hw,
+                confidence=confidence,
             )
 
             if inserted:
@@ -141,6 +143,7 @@ def main():
                 escalation_reason=escalation_reason,
                 grading_source=grading_source,
                 hw=hw,
+                confidence=confidence,
             )
 
             if inserted:
@@ -163,6 +166,7 @@ def main():
                 escalation_reason=escalation_reason,
                 grading_source=grading_source,
                 hw=hw,
+                confidence=confidence,
             )
 
             if escalate:
