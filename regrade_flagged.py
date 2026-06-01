@@ -195,4 +195,13 @@ def main():
 # Entry Point
 # ------------------------------------------------------------
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Force-regrade specific HomeworkIDs")
+    parser.add_argument(
+        "--hwid", type=int, nargs="+",
+        help="One or more HomeworkIDs to regrade (overrides FLAGGED_HWIDS)"
+    )
+    args = parser.parse_args()
+    if args.hwid:
+        FLAGGED_HWIDS[:] = args.hwid
     main()

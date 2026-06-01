@@ -9,7 +9,7 @@ FORCE_SEND_EMAIL = os.getenv("FORCE_SEND_EMAIL", "no").lower() == "yes"
 
 # GLOBAL SAFETY LOCK
 if not FORCE_SEND_EMAIL:
-    print("❌ FORCE_SEND_EMAIL=no — ALL EMAILS DISABLED")
+    print("[DISABLED] FORCE_SEND_EMAIL=no -- ALL EMAILS DISABLED")
 
 # ----------------------------------------------------------------------
 # ENV VARIABLES (Must be in .env)
