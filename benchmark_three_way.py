@@ -28,7 +28,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 TRUTH_CSV   = "benchmark_truth.csv"
 RESULTS_CSV = "benchmark_three_way_results.csv"
-SOURCE_VIEW = "vw_Homework"
+SOURCE_VIEW = "ADF_Homework_test"
 
 
 # ----------------------------------------------------------------
