@@ -88,29 +88,29 @@ class TestMapScoreToGrade:
     def test_perfect_score_gives_grade_5(self):
         assert _map_score_to_grade(1.0) == 5
 
-    def test_boundary_0_60_gives_grade_5(self):
-        assert _map_score_to_grade(0.60) == 5
+    def test_boundary_0_75_gives_grade_5(self):
+        assert _map_score_to_grade(0.75) == 5
 
-    def test_just_below_0_60_gives_grade_4(self):
-        assert _map_score_to_grade(0.59) == 4
+    def test_just_below_0_75_gives_grade_4(self):
+        assert _map_score_to_grade(0.74) == 4
 
-    def test_boundary_0_40_gives_grade_4(self):
-        assert _map_score_to_grade(0.40) == 4
+    def test_boundary_0_65_gives_grade_4(self):
+        assert _map_score_to_grade(0.65) == 4
 
-    def test_just_below_0_40_gives_grade_3(self):
-        assert _map_score_to_grade(0.39) == 3
+    def test_just_below_0_65_gives_grade_3(self):
+        assert _map_score_to_grade(0.64) == 3
 
-    def test_boundary_0_20_gives_grade_3(self):
-        assert _map_score_to_grade(0.20) == 3
+    def test_boundary_0_50_gives_grade_3(self):
+        assert _map_score_to_grade(0.50) == 3
 
-    def test_just_below_0_20_gives_grade_2(self):
-        assert _map_score_to_grade(0.19) == 2
+    def test_just_below_0_50_gives_grade_2(self):
+        assert _map_score_to_grade(0.49) == 2
 
-    def test_boundary_0_10_gives_grade_2(self):
-        assert _map_score_to_grade(0.10) == 2
+    def test_boundary_0_20_gives_grade_2(self):
+        assert _map_score_to_grade(0.20) == 2
 
-    def test_just_below_0_10_gives_grade_1(self):
-        assert _map_score_to_grade(0.09) == 1
+    def test_just_below_0_20_gives_grade_1(self):
+        assert _map_score_to_grade(0.19) == 1
 
     def test_zero_gives_grade_1(self):
         assert _map_score_to_grade(0.0) == 1
@@ -132,21 +132,21 @@ class TestGradeSqlStructural:
         assert result["escalation_reason"] is None
         assert result["sql_missing_ops"] == []
 
-    def test_missing_count_when_required_returns_score_zero_grade_1(self):
-        # Answer key has COUNT; strict enforcement returns 0.0 immediately.
+    def test_missing_count_when_required_returns_partial_score_grade_5(self):
+        # Answer key has WHERE + JOIN + GROUP BY + COUNT; student satisfies 3 of 4.
         result = _grade_sql_structural(SQL_FULL, SQL_STUDENT_NO_COUNT)
-        assert result["score"] == 0.0
-        assert result["grade"] == 1
-        assert result["escalate"] is True
-        assert "missing_count" in result["sql_missing_ops"]
-
-    def test_partial_structural_match_gives_grade_4(self):
-        # Answer: JOIN + GROUP BY + SUM + HAVING (4 required, no COUNT).
-        # Student: JOIN + GROUP BY only → 2/4 = 0.50 → grade 4.
-        result = _grade_sql_structural(SQL_ANS_AGGREGATE, SQL_STUDENT_PARTIAL)
-        assert result["grade"] == 4
-        assert result["structural_valid"] is True
+        assert result["score"] == 0.75
+        assert result["grade"] == 5
         assert result["escalate"] is False
+        assert "has_count" in result["sql_missing_ops"]
+
+    def test_partial_structural_match_gives_grade_3(self):
+        # Answer: JOIN + GROUP BY + SUM + HAVING (4 required, no COUNT).
+        # Student: JOIN + GROUP BY only → 2/4 = 0.50 → grade 3.
+        result = _grade_sql_structural(SQL_ANS_AGGREGATE, SQL_STUDENT_PARTIAL)
+        assert result["grade"] == 3
+        assert result["structural_valid"] is True
+        assert result["escalate"] is True
         # Both SUM and HAVING should be listed as missing
         assert "has_sum" in result["sql_missing_ops"]
         assert "has_having" in result["sql_missing_ops"]
@@ -180,7 +180,7 @@ class TestGradeSqlStructural:
 
     def test_escalate_is_true_when_grade_le_2(self):
         # grade <= 2 must escalate per the structural rule
-        result = _grade_sql_structural(SQL_FULL, SQL_STUDENT_NO_COUNT)
+        result = _grade_sql_structural(SQL_FULL, "SELECT 1")
         assert result["grade"] <= 2
         assert result["escalate"] is True
 
@@ -450,34 +450,54 @@ _FINGERPRINT_FIXTURES = [
     (
         "SELECT AVG(col) FROM t GROUP BY x",
         "SELECT col FROM t GROUP BY x",
-        "has_avg", 4,
+        "has_avg", 3,
     ),
     (
         "SELECT MIN(col) FROM t GROUP BY x",
         "SELECT col FROM t GROUP BY x",
-        "has_min", 4,
+        "has_min", 3,
     ),
     (
         "SELECT MAX(col) FROM t GROUP BY x",
         "SELECT col FROM t GROUP BY x",
-        "has_max", 4,
+        "has_max", 3,
     ),
     (
         "SELECT DISTINCT col FROM t GROUP BY x",
         "SELECT col FROM t GROUP BY x",
-        "has_distinct", 4,
+        "has_distinct", 3,
     ),
     # CTE answer also triggers has_subquery (the `(SELECT …)` inside WITH),
-    # so total_required=3, student satisfies 1 (GROUP BY) → grade 3.
+    # so total_required=3, student satisfies 1 (GROUP BY) → grade 2.
     (
         "WITH cte AS (SELECT 1) SELECT * FROM cte GROUP BY 1",
         "SELECT 1 GROUP BY 1",
-        "has_cte", 3,
+        "has_cte", 2,
     ),
     (
         "SELECT * FROM (SELECT id FROM t) sub GROUP BY sub.id",
         "SELECT id FROM t GROUP BY id",
-        "has_subquery", 4,
+        "has_subquery", 3,
+    ),
+    (
+        "SELECT col FROM t WHERE active = 1 GROUP BY col",
+        "SELECT col FROM t GROUP BY col",
+        "has_where", 3,
+    ),
+    (
+        "SELECT col FROM t GROUP BY col ORDER BY col",
+        "SELECT col FROM t GROUP BY col",
+        "has_order_by", 3,
+    ),
+    (
+        "INSERT INTO t SELECT col FROM s GROUP BY col",
+        "SELECT col FROM s GROUP BY col",
+        "has_insert_into", 3,
+    ),
+    (
+        "SELECT * FROM t1, t2 GROUP BY t1.id",
+        "SELECT * FROM t1 GROUP BY t1.id",
+        "has_implicit_join", 3,
     ),
 ]
 
@@ -518,15 +538,73 @@ class TestSqlPatternCoverage:
         assert result["grade"] == expected_grade
         assert feature_key in result["sql_missing_ops"]
 
+    def test_answer_with_where_only_is_tracked_structure(self):
+        result = _grade_sql_structural(
+            "SELECT name FROM users WHERE active = 1",
+            "SELECT name FROM users",
+        )
+        assert result["grade"] == 1
+        assert result["escalate"] is True
+        assert "has_where" in result["sql_missing_ops"]
+
+    def test_answer_with_order_by_only_is_tracked_structure(self):
+        result = _grade_sql_structural(
+            "SELECT name FROM users ORDER BY name",
+            "SELECT name FROM users",
+        )
+        assert result["grade"] == 1
+        assert result["escalate"] is True
+        assert "has_order_by" in result["sql_missing_ops"]
+
+    @pytest.mark.parametrize("answer_sql, student_sql, feature_key", [
+        ("INSERT INTO users VALUES (1)", "SELECT 1", "has_insert_into"),
+        ("UPDATE users SET active = 1", "SELECT 1", "has_update"),
+        ("DELETE FROM users", "SELECT 1", "has_delete"),
+    ])
+    def test_dml_is_structurally_scored(
+        self, answer_sql, student_sql, feature_key
+    ):
+        result = _grade_sql_structural(answer_sql, student_sql)
+        assert result["grade"] == 1
+        assert result["escalate"] is True
+        assert feature_key in result["sql_missing_ops"]
+
+    @pytest.mark.parametrize("answer_sql, student_sql, feature_key", [
+        ("CREATE TABLE users (id INT)", "SELECT 1", "has_create_table"),
+        ("ALTER TABLE users ADD active BIT", "SELECT 1", "has_alter_table"),
+    ])
+    def test_ddl_is_structurally_scored(
+        self, answer_sql, student_sql, feature_key
+    ):
+        result = _grade_sql_structural(answer_sql, student_sql)
+        assert result["grade"] == 1
+        assert result["escalate"] is True
+        assert feature_key in result["sql_missing_ops"]
+
+    @pytest.mark.parametrize("answer_sql, student_sql, feature_key", [
+        ("DECLARE @id INT", "SELECT 1", "has_declare"),
+        ("SET @id = 1", "SELECT 1", "has_set"),
+        (
+            "CREATE FUNCTION dbo.fn_test() RETURNS INT AS BEGIN RETURN 1 END",
+            "SELECT 1",
+            "has_create_func",
+        ),
+        (
+            "CREATE PROCEDURE dbo.proc_test AS SELECT 1",
+            "SELECT 1",
+            "has_create_proc",
+        ),
+    ])
+    def test_variable_and_routine_sql_is_structurally_scored(
+        self, answer_sql, student_sql, feature_key
+    ):
+        result = _grade_sql_structural(answer_sql, student_sql)
+        assert result["grade"] == 1
+        assert result["escalate"] is True
+        assert feature_key in result["sql_missing_ops"]
+
     @pytest.mark.parametrize("untracked_sql", [
-        "ORDER BY name",
         "CASE WHEN x > 1 THEN 'y' ELSE 'n' END",
-        "CREATE TABLE t (id INT)",
-        "INSERT INTO t VALUES (1)",
-        "UPDATE t SET x = 1",
-        "DELETE FROM t WHERE id = 1",
-        "ALTER TABLE t ADD col INT",
-        "SELECT * FROM t1, t2 WHERE t1.id = t2.id",  # implicit join
     ])
     def test_sql_ops_only_patterns_have_no_structural_scoring_effect(
         self, untracked_sql

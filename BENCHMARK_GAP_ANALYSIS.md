@@ -31,7 +31,7 @@ False reject means manual grade is 3 or higher while the grader grade is below 3
 | 376956 | 4 | 3 | 5 | -1 | +1 | AI undergrade / Python overgrade | Borderline severity calibration around minor rubric misses. |
 | 376957 | 5 | 3 | 5 | -2 | 0 | AI undergrade | AI prompt appears too reluctant to award 5 for complete submissions. |
 | 376958 | 4 | 3 | 5 | -1 | +1 | AI undergrade / Python overgrade | AI and Python bracket the manual grade; likely 4-vs-3/5 calibration issue. |
-| 376959 | 4 | 1 | 1 | -3 | -3 | Shared false reject | Known `__MACOSX` false-reject case; valid submission content is likely being missed or discounted. |
+| 376959 | 4 | 1 | 1 | -3 | -3 | Shared false reject | Multi-file policy conflict / manual grade mismatch; current evidence says the submission contains two real SQL files, so the reject may be policy-correct or needs manual policy review. |
 | 376960 | 1 | 1 | 1 | 0 | 0 | Aligned | No observed gap. |
 | 376961 | 1 | 1 | 1 | 0 | 0 | Aligned | No observed gap. |
 | 376962 | 5 | 3 | 4 | -2 | -1 | Shared undergrade | Both graders are conservative on a high-scoring submission; AI penalty is stronger. |
@@ -86,9 +86,9 @@ False reject means manual grade is 3 or higher while the grader grade is below 3
 
 ## Recommended Next ONE Python Logic Fix
 
-Fix the Python false-reject path for submissions whose valid content is missed during archive/file discovery, starting with HWID 376959 and the known `__MACOSX` case.
+Review and clarify the Python multi-file policy path for HWID 376959 before changing scoring behavior.
 
-Reason: this is the clearest shared failure and a high-severity Python miss: manual 4, AI 1, Python 1. It likely affects content discovery before rubric scoring, so fixing it may convert a catastrophic false reject into a normal scoring case without changing database writes or production behavior in this calibration pass.
+Reason: this is the clearest shared failure and a high-severity Python miss on paper: manual 4, AI 1, Python 1. However, current evidence says 376959 contains two real SQL files, so the next Python step should determine whether the rejection is policy-correct or whether the manual benchmark grade needs review.
 
 ## Recommended Next ONE AI Prompt Calibration
 
