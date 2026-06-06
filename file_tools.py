@@ -45,11 +45,24 @@ def inspect_zip_extensions(zip_path: Optional[str]) -> List[str]:
         with zipfile.ZipFile(zip_path, "r") as z:
             exts = []
             for name in z.namelist():
-                if "." in name:
+                if "." in name and _is_real_file(name):
                     exts.append(name.split(".")[-1].lower())
             return exts
     except Exception:
         return []
+
+def _is_real_file(path: str) -> bool:
+    """
+    Return True only for real submission files.
+    Filters out macOS ZIP artifacts: __MACOSX folders and ._-prefixed files.
+    """
+    parts = path.replace("\\", "/").split("/")
+    if "__MACOSX" in parts:
+        return False
+    filename = parts[-1]
+    if filename.startswith("._"):
+        return False
+    return True
 
 def extract_sql_from_zip(zip_path: Optional[str]) -> str:
     if not zip_path:
@@ -58,7 +71,7 @@ def extract_sql_from_zip(zip_path: Optional[str]) -> str:
         with zipfile.ZipFile(zip_path, "r") as z:
             sql_files = sorted(
                 name for name in z.namelist()
-                if name.lower().endswith(".sql")
+                if name.lower().endswith(".sql") and _is_real_file(name)
             )
             if not sql_files:
                 return ""
