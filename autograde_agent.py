@@ -182,7 +182,7 @@ SYSTEM_PROMPT = """You are an expert data analytics instructor grading student h
 - Answer key requires .sql AND student has zero .sql files → grade=1, escalate=true.
 - Answer key requires .docx AND student has zero .docx files → grade=1, escalate=true.
 - All SQL content is empty → grade=1, escalate=true.
-- Student submitted MORE THAN ONE .sql file → grade=1, escalate=true. Reason: "Multiple SQL files submitted; submission must contain exactly one .sql file."
+- Student submitted MORE THAN ONE .sql file → concatenate all SQL files and grade the combined content normally. Do NOT reject for multiple SQL files. This is permitted per grading policy.
 - Student submitted MORE THAN ONE .docx file → grade=1, escalate=true. Reason: "Multiple DOCX files submitted; submission must contain exactly one .docx file."
 
 ========== GRADING SCALE ==========
@@ -374,7 +374,7 @@ def _make_executor(hw: Dict[str, Any]) -> Tuple[Callable, Callable]:
             # One-file-per-type policy enforcement
             sql_count = stu_exts_list.count("sql")
             docx_count = stu_exts_list.count("docx")
-            multiple_sql = "sql" in required and sql_count > 1
+            multiple_sql = False  # Multi-file SQL allowed — content is concatenated and graded
             multiple_docx = "docx" in required and docx_count > 1
 
             rejection_reasons = []

@@ -828,22 +828,10 @@ def autograde_homework(hw: Dict[str, Any]) -> Dict[str, Any]:
             }
             return _apply_performance_escalation(hw, base)
 
-        # One-file-per-type policy: multiple .sql files → reject
+        # Multi-file SQL policy: concatenate and grade (policy updated per Bala's grading)
+        # Multiple SQL files are permitted — extract_sql_from_zip already concatenates them
         sql_count = stu_exts.count("sql") if isinstance(stu_exts, list) else 1
-        if sql_count > 1:
-            base = {
-                "grade": 1,
-                "assignment_type": "sql",
-                "structural_valid": False,
-                "sql_missing_ops": [],
-                "sql_partial_ops": [],
-                "escalate": True,
-                "escalation_reason": (
-                    f"Multiple SQL files submitted ({sql_count}); submission must "
-                    "contain exactly one .sql file — manual review required."
-                ),
-            }
-            return _apply_performance_escalation(hw, base)
+        # Note: sql_count > 1 no longer triggers rejection
 
         stu_sql = extract_sql_from_zip(stu_zip)
         ans_sql = extract_sql_from_zip(ans_zip)
