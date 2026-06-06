@@ -18,7 +18,6 @@ from datetime import date
 
 from autograde_agent import autograde_homework_agent
 from autograde_tools import autograde_homework
-from db_tools import get_connection
 
 # ----------------------------------------------------------------
 # Logging — suppress INFO noise; silence httpx
@@ -26,9 +25,8 @@ from db_tools import get_connection
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s | %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-TRUTH_CSV   = "benchmark_truth.csv"
+TRUTH_CSV   = "benchmark_input.csv"
 RESULTS_CSV = "benchmark_three_way_results.csv"
-SOURCE_VIEW = "ADF_Homework_test"
 
 
 # ----------------------------------------------------------------
@@ -36,41 +34,24 @@ SOURCE_VIEW = "ADF_Homework_test"
 # ----------------------------------------------------------------
 
 def load_truth(path: str) -> list[dict]:
-    """Read benchmark_truth.csv → list of dicts."""
+    """Read benchmark_input.csv → list of dicts with all fields needed for grading."""
     if not os.path.exists(path):
-        raise FileNotFoundError(f"Truth file not found: {path}")
+        raise FileNotFoundError(f"Benchmark input file not found: {path}")
     rows = []
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
             rows.append({
-                "HomeworkID":  int(row["HomeworkID"].strip()),
-                "ManualGrade": int(row["ManualGrade"].strip()),
-                "Notes":       row.get("Notes", "").strip(),
+                "HomeworkID":   int(row["HomeworkID"].strip()),
+                "ManualGrade":  int(row["ManualGrade"].strip()),
+                "StudentName":  row.get("StudentName", "Unknown").strip(),
+                "SectionName":  row.get("SectionName", "").strip(),
+                "HomeworkLink": row.get("HomeworkLink", "").strip(),
+                "AnswerKey":    row.get("AnswerKey", "").strip(),
+                "Notes":        row.get("Notes", "").strip(),
             })
     return rows
 
-
-def fetch_homework_by_id(hwid: int) -> dict | None:
-    """Query all fields from vw_Homework for a single HomeworkID. Read-only."""
-    conn = get_connection()
-    if not conn:
-        logging.error(f"No DB connection for HWID {hwid}")
-        return None
-    try:
-        cursor = conn.cursor()
-        cursor.execute(f"SELECT * FROM {SOURCE_VIEW} WHERE HomeworkID = ?", (hwid,))
-        columns = [col[0] for col in cursor.description]
-        row = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        if row is None:
-            logging.warning(f"HWID {hwid} not found in {SOURCE_VIEW}")
-            return None
-        return dict(zip(columns, row))
-    except Exception as e:
-        logging.error(f"Error fetching HWID {hwid}: {e}")
-        return None
 
 
 def _flags(manual: int, ai: int, py: int) -> str:
@@ -158,16 +139,7 @@ def main():
 
         print(f"Grading HWID {hwid} | ManualGrade={manual_grade}")
 
-        hw = fetch_homework_by_id(hwid)
-        if hw is None:
-            print(f"  HWID {hwid} | Not found in {SOURCE_VIEW} — skipping")
-            result_rows.append({
-                "HWID": hwid, "Student": "N/A",
-                "Manual": manual_grade, "AI": "ERR",
-                "Python": "ERR", "Flags": "NOT-FOUND",
-            })
-            continue
-
+        hw = entry  # all fields already loaded from benchmark_input.csv
         student_name = hw.get("StudentName", "Unknown")
 
         # ── AI Agent ─────────────────────────────────────────────
