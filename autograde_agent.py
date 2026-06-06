@@ -465,6 +465,7 @@ def _run_agent_once(
                 messages=openai_messages,
                 tools=openai_tools,
                 tool_choice="auto",
+                temperature=float(os.getenv("AI_TEMPERATURE", "0.2")),
             )
         except Exception as e:
             logger.error(f"HWID {hwid}: OpenAI API error on turn {turn + 1}: {e}")
